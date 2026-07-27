@@ -15,6 +15,7 @@ const tabs = [
   ["overview", "Ringkasan"], ["rundown", "Rundown"],
   ["budget", "Anggaran"], ["checklist", "Checklist"],
 ];
+const CLOUD_UID_KEY = "serenity-itinerary-cloud-uid";
 const AI_PROVIDERS = {
   deepseek: { label: "DeepSeek", model: "deepseek-chat" },
   openai: { label: "OpenAI", model: "gpt-4o-mini" },
@@ -67,6 +68,13 @@ export default function Home() {
       setCloudState("local");
       return;
     }
+    const previousUid = localStorage.getItem(CLOUD_UID_KEY);
+    if (previousUid && previousUid !== currentUser.uid) {
+      setTrips([]);
+      setSelectedId(null);
+      setView("home");
+    }
+    localStorage.setItem(CLOUD_UID_KEY, currentUser.uid);
     setCloudState("connecting");
     try {
       await bootstrapWorkspace(currentUser);
