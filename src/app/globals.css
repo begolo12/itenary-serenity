@@ -694,3 +694,185 @@ input[inputmode="numeric"] { font-variant-numeric: tabular-nums; }
   margin-bottom: 12px;
 }
 
+/* ==================== CALENDAR ==================== */
+.calendar-view { max-width: 960px; margin: 0 auto; }
+.calendar-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.calendar-nav { display: flex; align-items: center; gap: 8px; }
+.calendar-nav h2 { margin: 0; font-size: 24px; font-weight: 500; min-width: 180px; text-align: center; }
+.calendar-nav button { width: 40px; height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); font-size: 20px; color: var(--pine); display: grid; place-items: center; }
+.calendar-nav button:hover { background: var(--soft); }
+.calendar-count { color: var(--muted); font-size: 13px; font-weight: 600; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); }
+.calendar-day-label { padding: 10px 4px; text-align: center; font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; background: var(--soft); }
+.calendar-day { position: relative; min-height: 72px; padding: 4px 3px 24px; border-right: 1px solid #edf1ee; border-bottom: 1px solid #edf1ee; background: var(--paper); text-align: left; cursor: default; }
+.calendar-day:nth-child(7n) { border-right: 0; }
+.calendar-day.weekend { background: #fafcfb; }
+.calendar-day.empty { background: #f7f9f7; pointer-events: none; }
+.calendar-date { position: absolute; top: 4px; left: 6px; font-size: 12px; font-weight: 700; color: var(--ink); }
+.calendar-day.today { box-shadow: inset 0 0 0 2px var(--coral); }
+.calendar-day.today .calendar-date { color: var(--coral); }
+.calendar-dots { position: absolute; bottom: 4px; left: 3px; right: 3px; display: flex; gap: 2px; flex-wrap: wrap; }
+.calendar-dot { width: 7px; height: 7px; min-width: 7px; border-radius: 50%; }
+.calendar-dot.more { background: var(--muted) !important; color: #fff; font-size: 6px; line-height: 7px; text-align: center; width: auto; min-width: 7px; padding: 0 2px; }
+.calendar-day:not(.empty):not(:disabled):hover { background: #eef5f1; cursor: pointer; }
+.calendar-popover-backdrop { position: fixed; inset: 0; z-index: 110; background: rgba(0,0,0,0.2); display: grid; place-items: center; padding: 16px; }
+.calendar-popover { width: min(360px, 100%); max-height: 70vh; overflow-y: auto; padding: 20px; }
+.calendar-popover header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.calendar-popover header h3 { margin: 0; font-size: 18px; }
+.calendar-popover header button { border: 0; background: transparent; font-size: 22px; color: var(--muted); min-width: 40px; min-height: 40px; }
+.calendar-popover-list { display: grid; gap: 6px; }
+.calendar-popover-item { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); text-align: left; width: 100%; transition: background 0.15s; }
+.calendar-popover-item:hover { background: var(--soft); }
+.calendar-popover-monogram { display: grid; width: 36px; height: 36px; min-width: 36px; place-items: center; border-radius: 50%; color: #fff; font: 500 14px var(--font-newsreader), Georgia, serif; }
+.calendar-popover-item div { flex: 1; min-width: 0; }
+.calendar-popover-item strong { display: block; font-size: 14px; line-height: 1.3; }
+.calendar-popover-item small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.calendar-popover-arrow { color: var(--pine); font-size: 16px; }
+
+/* ==================== DASHBOARD INSIGHTS ==================== */
+.insight-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin: 17px auto 0; max-width: 1260px; }
+.insight-card { padding: 24px; min-height: 180px; }
+.insight-card .eyebrow { margin-bottom: 14px; }
+.insight-empty { color: var(--muted); font-size: 13px; }
+.chart-bars { display: grid; gap: 10px; }
+.chart-bar-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 10px; }
+.chart-bar-label { font-size: 11px; font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chart-bar-track { position: relative; height: 22px; background: var(--soft); border-radius: 4px; overflow: hidden; }
+.chart-bar-fill { height: 100%; background: var(--coral); border-radius: 4px; transition: width 0.6s ease; min-width: 2px; }
+.chart-bar-val { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 8px; font-size: 10px; font-weight: 700; color: var(--ink); }
+.chart-donut-wrap, .status-donut-wrap { display: flex; align-items: center; gap: 20px; }
+.chart-donut { width: 100px; height: 100px; min-width: 100px; border-radius: 50%; display: grid; place-items: center; }
+.chart-donut span { background: var(--paper); width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font: 600 18px var(--font-newsreader), Georgia, serif; color: var(--ink); }
+.status-donut { width: 80px; height: 80px; min-width: 80px; }
+.status-donut span { width: 50px; height: 50px; font-size: 16px; }
+.chart-donut-legend { display: grid; gap: 5px; }
+.chart-donut-legend div { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); }
+.legend-dot { width: 9px; height: 9px; min-width: 9px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.1); }
+.checklist-summary { text-align: center; }
+.checklist-big-num { font: 500 42px var(--font-newsreader), Georgia, serif; color: var(--pine); }
+.checklist-big-num small { font-size: 18px; color: var(--muted); }
+.checklist-summary > small { color: var(--muted); font-size: 12px; }
+.tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-bubble { padding: 5px 10px; border-radius: 14px; background: var(--soft); font-size: 12px; font-weight: 700; color: var(--pine); }
+.tag-bubble b { font-weight: 800; margin-left: 3px; color: var(--coral); }
+
+/* ==================== ALL MOBILE CSS FIXES ==================== */
+@media (max-width: 720px) {
+  /* scrollbar hide */
+  .tabs::-webkit-scrollbar, .metrics::-webkit-scrollbar { display: none; }
+  .tabs, .metrics { scrollbar-width: none; -ms-overflow-style: none; }
+
+  /* timeline dot sizing */
+  .timeline-dot { width: 22px; height: 22px; margin: 5px 8px 0 0; }
+  .progress-bar { height: 24px; }
+
+  /* data-list grid fix */
+  .data-list article .mini { grid-column: 2 / -1; grid-row: 2; }
+
+  /* modal */
+  .modal { padding: 18px; }
+  .modal footer button { flex: 1; min-width: 0; font-size: 13px; }
+
+  /* notice bar */
+  .notice-bar { padding: 8px 10px; font-size: 12px; top: 8px; }
+
+  /* hero clamp fix */
+  .hero h2 { font-size: clamp(22px, 6vw, 28px); }
+
+  /* bottom nav safe area */
+  .bottom-nav { padding-left: env(safe-area-inset-left, 2px); padding-right: env(safe-area-inset-right, 2px); }
+
+  /* budget summary wrap */
+  .budget-summary { flex-wrap: wrap; }
+
+  /* checklist category */
+  .checklist-category small { font-size: 11px; }
+}
+
+@media (max-width: 420px) {
+  /* timeline dot */
+  .timeline-dot { width: 18px; height: 18px; margin: 4px 6px 0 0; font-size: 8px; border-width: 2px; }
+  .progress-bar { height: 20px; }
+
+  /* hero overlay fix */
+  .hero::after { opacity: 0.2; }
+
+  /* detail photo button */
+  .detail-photo button { font-size: 7px; padding: 3px; left: 4px; right: 4px; }
+
+  /* settings */
+  .settings { gap: 16px; padding: 14px 10px; }
+  .sync-setting { padding: 10px; }
+  .privacy { padding: 10px; gap: 8px; }
+  .key-field span input { padding-right: 70px; }
+  .button-row button { min-width: 0; }
+  .auth-form .button-row button { font-size: 12px; }
+
+  /* wizard */
+  .wizard { padding: 16px 12px; }
+  .wizard .lead { font-size: 12px; }
+  .form-grid { gap: 10px; }
+
+  /* trip card */
+  .trip-card { grid-template-columns: 40px 1fr; min-height: 120px; }
+  .trip-monogram { font-size: 14px; }
+  .trip-progress { left: 54px; }
+  .trip-copy { padding: 12px 10px 32px; }
+
+  /* timeline actions */
+  .timeline-actions .mini { padding: 3px 5px; font-size: 9px; }
+
+  /* calendar */
+  .calendar-header { gap: 8px; }
+  .calendar-nav h2 { font-size: 18px; min-width: 140px; }
+  .calendar-nav button { width: 34px; height: 34px; font-size: 16px; }
+  .calendar-day { min-height: 52px; padding: 2px 2px 18px; }
+  .calendar-date { font-size: 10px; top: 2px; left: 4px; }
+  .calendar-dot { width: 5px; height: 5px; min-width: 5px; }
+  .calendar-day-label { padding: 6px 2px; font-size: 9px; }
+
+  /* insight grid */
+  .insight-grid { grid-template-columns: 1fr; }
+  .insight-card { padding: 16px; min-height: auto; }
+  .chart-bar-row { grid-template-columns: 70px 1fr; gap: 6px; }
+  .chart-bar-label { font-size: 10px; }
+  .chart-donut { width: 72px; height: 72px; min-width: 72px; }
+  .chart-donut span { width: 46px; height: 46px; font-size: 14px; }
+  .checklist-big-num { font-size: 32px; }
+}
+
+@media (max-width: 360px) {
+  .content { padding: 12px 8px 72px; }
+  .hero { min-height: 240px; padding: 16px 12px; }
+  .hero h2 { font-size: 20px; }
+  .hero p:not(.eyebrow) { font-size: 11px; }
+  .topbar h1 { font-size: 20px; }
+  .tabs button { min-width: 60px; padding: 8px 6px; font-size: 10px; }
+  .trip-card { grid-template-columns: 36px 1fr; min-height: 110px; }
+  .trip-monogram { font-size: 12px; }
+  .trip-progress { left: 48px; right: 10px; bottom: 8px; }
+  .trip-copy h3 { font-size: 14px; }
+  .trip-copy { padding: 10px 8px 28px; }
+  .timeline article { grid-template-columns: 38px 8px 1fr; gap: 4px; }
+  .timeline-card { padding: 8px 10px; }
+  .timeline-card h3 { font-size: 12px; }
+  .timeline-card p { font-size: 10px; }
+  .detail-hero { padding: 10px; }
+  .detail-photo { width: 50px; height: 60px; }
+  .detail-copy h2 { font-size: 16px; }
+  .settings { gap: 12px; padding: 12px 8px; }
+  .settings-title h2 { font-size: 18px; }
+  .wizard { padding: 12px 10px; }
+  .wizard h2 { font-size: 19px; }
+  .bottom-nav { height: 52px; }
+  .bottom-nav button { font-size: 8px; min-width: 48px; }
+  .bottom-nav .fab { width: 38px; height: 38px; min-width: 38px; font-size: 16px; margin-top: -16px; }
+  .calendar-nav h2 { font-size: 16px; min-width: 120px; }
+  .calendar-day { min-height: 44px; }
+  .calendar-day-label { font-size: 8px; padding: 4px 1px; }
+  .calendar-date { font-size: 9px; }
+  .insight-card { padding: 12px; }
+  .chart-bar-row { grid-template-columns: 60px 1fr; }
+  .chart-bar-track { height: 18px; }
+}
+

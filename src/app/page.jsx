@@ -168,6 +168,7 @@ export default function Home() {
         {hydrated && view === "detail" && selected && <TripDetail trip={selected} tab={tab} setTab={setTab} updateTrip={updateTrip} removeTrip={removeTrip} toast={toast} cloudReady={cloudReady} />}
         {hydrated && view === "detail" && !selected && <Empty title="Itinerary tidak ditemukan" text="Pilih itinerary dari beranda atau buat rencana baru." action={() => nav("home")} actionText="Ke beranda" />}
         {hydrated && view === "settings" && <Settings apiKey={apiKey} setApiKey={setApiKey} provider={aiProvider} setProvider={setAiProvider} user={user} cloudState={cloudState} cloudReady={cloudReady} toast={toast} />}
+        {hydrated && view === "calendar" && <CalendarView trips={trips} openTrip={openTrip} create={() => nav("new")} />}
       </section>
       <BottomNav view={view} nav={nav} openTrip={openTrip} selectedId={selectedId} trips={trips} />
     </main>
@@ -188,6 +189,7 @@ function Sidebar({ view, trips, nav, openTrip, cloudState }) {
       <button className={view === "home" ? "active" : ""} onClick={() => nav("home")}><Icon>⌂</Icon> Beranda</button>
       <button className={view === "detail" ? "active" : ""} onClick={() => trips[0] ? openTrip(trips[0].id) : nav("new")}><Icon>≡</Icon> Itinerary <span className="count">{trips.length}</span></button>
       <button className={view === "settings" ? "active" : ""} onClick={() => nav("settings")}><Icon>⚙</Icon> Pengaturan</button>
+      <button className={view === "calendar" ? "active" : ""} onClick={() => nav("calendar")}><Icon>📅</Icon> Kalender</button>
     </nav>
     <div className="sync-card"><i className={cloudState} /><div><strong>{syncLabel(cloudState)}</strong><small>{cloudState === "local" ? "Simpan perjalanan ke cloud" : "Workspace pribadi"}</small></div>{cloudState === "local" && <button className="sync-login" onClick={() => window.location.href = "/login"}>Login</button>}</div>
   </aside>;
@@ -197,7 +199,7 @@ function Icon({ children }) { return <span className="nav-icon" aria-hidden="tru
 function syncLabel(state) { return ({ local: "Mode lokal", connecting: "Menyiapkan cloud", saving: "Menyimpan...", synced: "Cloud tersinkron", offline: "Offline · lokal aman", error: "Cloud bermasalah" })[state] || state; }
 
 function Topbar({ view, selected, cloudState, user }) {
-  const title = view === "home" ? "Rencanakan dengan tenang." : view === "new" ? "Perjalanan baru" : view === "settings" ? "Pengaturan" : selected?.title || "Itinerary";
+  const title = view === "home" ? "Rencanakan dengan tenang." : view === "new" ? "Perjalanan baru" : view === "settings" ? "Pengaturan" : view === "calendar" ? "Kalender perjalanan" : selected?.title || "Itinerary";
   return <header className="topbar"><div><p className="eyebrow">SERENITY ATLAS</p><h1>{title}</h1></div><div className={`cloud-state ${cloudState}`}><i /><span>{user ? "Workspace anonim" : "Penyimpanan lokal"}<strong>{syncLabel(cloudState)}</strong></span></div></header>;
 }
 
@@ -215,6 +217,24 @@ function Dashboard({ trips, openTrip, create }) {
     return match && (filter === "all" || filter === state);
   });
   const openTasks = trips.reduce((sum, trip) => sum + trip.tasks.filter((task) => !task.done).length, 0);
+  const totalBudget = trips.reduce((sum, trip) => sum + Number(trip.budget || 0), 0);
+  const totalSpent = trips.reduce((sum, trip) => sum + trip.expenses.reduce((s, e) => s + Number(e.amount), 0), 0);
+  const allExpenses = {};
+  trips.forEach((trip) => trip.expenses.forEach((e) => {
+    const cat = e.category || "Lainnya";
+    allExpenses[cat] = (allExpenses[cat] || 0) + Number(e.amount);
+  }));
+  const expenseEntries = Object.entries(allExpenses).sort((a, b) => b[1] - a[1]);
+  const maxExpense = expenseEntries.length ? expenseEntries[0][1] : 1;
+  const totalTasks = trips.reduce((sum, t) => sum + t.tasks.length, 0);
+  const doneTasks = trips.reduce((sum, t) => sum + t.tasks.filter((tk) => tk.done).length, 0);
+  const budgetPct = totalBudget ? Math.round(totalSpent / totalBudget * 100) : 0;
+  const upcomingTrips = trips.filter((t) => t.endDate >= today).length;
+  const pastTrips = trips.filter((t) => t.endDate < today).length;
+  const destFreq = {};
+  trips.forEach((t) => { if (t.destination) destFreq[t.destination] = (destFreq[t.destination] || 0) + 1; });
+  const topDests = Object.entries(destFreq).sort((a, b) => b[1] - a[1]).slice(0, 6);
+
   return <>
     <section className="hero">
       <div><p className="eyebrow light">WORKSPACE PRIBADI</p><h2>Perjalanan yang rapi,<br />dari niat hingga pulang.</h2><p>Susun agenda, biaya, dan hal kecil yang tidak boleh tertinggal.</p><button className="secondary" onClick={create}>Mulai merancang <span>→</span></button></div>
@@ -223,8 +243,71 @@ function Dashboard({ trips, openTrip, create }) {
     <section className="metrics">
       <article><span className="metric-icon">↗</span><strong>{trips.length}</strong><small>Rencana tersimpan</small></article>
       <article><span className="metric-icon">✓</span><strong>{openTasks}</strong><small>Tugas terbuka</small></article>
-      <article><span className="metric-icon">Rp</span><strong>{rupiah(trips.reduce((sum, trip) => sum + Number(trip.budget || 0), 0))}</strong><small>Total anggaran</small></article>
+      <article><span className="metric-icon">Rp</span><strong>{rupiah(totalBudget)}</strong><small>Total anggaran</small></article>
     </section>
+    {trips.length > 0 && (
+      <section className="insight-grid">
+        <article className="insight-card card">
+          <p className="eyebrow">PENGELUARAN PER KATEGORI</p>
+          {expenseEntries.length === 0 ? <p className="insight-empty">Belum ada pengeluaran tercatat.</p> : (
+            <div className="chart-bars">
+              {expenseEntries.map(([cat, amt]) => (
+                <div key={cat} className="chart-bar-row">
+                  <span className="chart-bar-label">{cat}</span>
+                  <div className="chart-bar-track"><div className="chart-bar-fill" style={{width: `${Math.round(amt / maxExpense * 100)}%`}} /><span className="chart-bar-val">{rupiah(amt)}</span></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+        <article className="insight-card card">
+          <p className="eyebrow">UTILITAS ANGGARAN</p>
+          <div className="chart-donut-wrap">
+            <div className="chart-donut" style={{background: `conic-gradient(var(--coral) 0% ${budgetPct}%, var(--soft) ${budgetPct}% 100%)`}}>
+              <span>{budgetPct}%</span>
+            </div>
+            <div className="chart-donut-legend">
+              <div><span className="legend-dot" style={{background:"var(--coral)"}} /> Terpakai: {rupiah(totalSpent)}</div>
+              <div><span className="legend-dot" style={{background:"var(--soft)"}} /> Tersisa: {rupiah(totalBudget - totalSpent)}</div>
+            </div>
+          </div>
+        </article>
+        <article className="insight-card card">
+          <p className="eyebrow">STATUS PERJALANAN</p>
+          <div className="status-donut-wrap">
+            <div className="chart-donut status-donut" style={{background: `conic-gradient(#176554 0% ${upcomingTrips ? upcomingTrips/trips.length*100 : 0}%, #e47759 ${upcomingTrips ? upcomingTrips/trips.length*100 : 0}% ${upcomingTrips ? (upcomingTrips+pastTrips)/trips.length*100 : 0}%, var(--soft) ${upcomingTrips ? (upcomingTrips+pastTrips)/trips.length*100 : 0}% 100%)`}}>
+              <span>{trips.length}</span>
+            </div>
+            <div className="chart-donut-legend">
+              <div><span className="legend-dot" style={{background:"#176554"}} /> Akan datang: {upcomingTrips}</div>
+              <div><span className="legend-dot" style={{background:"#e47759"}} /> Selesai: {pastTrips}</div>
+              <div><span className="legend-dot" style={{background:"var(--soft)"}} /> Draft: {trips.length - upcomingTrips - pastTrips}</div>
+            </div>
+          </div>
+        </article>
+        <article className="insight-card card">
+          <p className="eyebrow">PROGRES CHECKLIST</p>
+          <div className="checklist-summary">
+            <div className="checklist-big-num">{doneTasks}<small>/{totalTasks}</small></div>
+            <div className="progress-bar checklist-progress" style={{margin: "12px 0"}}>
+              <div className="progress-fill" style={{width: `${totalTasks ? doneTasks/totalTasks*100 : 0}%`}} />
+              <span>{totalTasks ? Math.round(doneTasks/totalTasks*100) : 0}% siap</span>
+            </div>
+            <small>{openTasks} tugas masih terbuka</small>
+          </div>
+        </article>
+        {topDests.length > 0 && (
+          <article className="insight-card card">
+            <p className="eyebrow">DESTINASI TERBANYAK</p>
+            <div className="tag-cloud">
+              {topDests.map(([dest, count]) => (
+                <span key={dest} className="tag-bubble">{dest} <b>{count}</b></span>
+              ))}
+            </div>
+          </article>
+        )}
+      </section>
+    )}
     <section className="section-heading"><div><p className="eyebrow">KOLEKSI ANDA</p><h2>Itinerary terbaru</h2></div><button className="text-button" onClick={create}>＋ Rencana baru</button></section>
     {trips.length > 0 && <div className="filters"><label className="search"><span aria-hidden="true">⌕</span><input aria-label="Cari itinerary" placeholder="Cari tujuan atau judul..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><label><span className="sr-only">Filter perjalanan</span><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">Semua perjalanan</option><option value="upcoming">Akan datang</option><option value="past">Selesai</option></select></label></div>}
     {!trips.length ? <Empty title="Atlas Anda masih kosong" text="Mulai dari template lokal atau hubungkan DeepSeek untuk membuat draft terstruktur." action={create} actionText="Buat itinerary pertama" /> : !shown.length ? <div className="no-results">Tidak ada itinerary yang cocok dengan pencarian ini.</div> : <div className="trip-grid">{shown.map((trip, index) => <TripCard key={trip.id} trip={trip} index={index} openTrip={openTrip} />)}</div>}
@@ -695,6 +778,119 @@ function authMessage(error) {
     "auth/cancelled-popup-request": "Login dibatalkan.",
   };
   return messages[error?.code] || cloudMessage(error);
+}
+
+const MONTHS = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+const DAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
+const TONE_COLORS = ["#176554", "#b85d47", "#596e5b", "#6366f1", "#e47759", "#0e3b33"];
+
+function CalendarView({ trips, openTrip, create }) {
+  const today = new Date();
+  const [month, setMonth] = useState(today.getMonth());
+  const [year, setYear] = useState(today.getFullYear());
+  const [popover, setPopover] = useState(null);
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startPad = (firstDay.getDay() + 6) % 7;
+  const totalDays = lastDay.getDate();
+  const totalCells = startPad + totalDays;
+  const rows = Math.ceil(totalCells / 7);
+
+  const tripsByDate = {};
+  trips.forEach((trip) => {
+    if (!trip.startDate || !trip.endDate) return;
+    const start = new Date(trip.startDate + "T00:00:00");
+    const end = new Date(trip.endDate + "T23:59:59");
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (!tripsByDate[key]) tripsByDate[key] = [];
+      tripsByDate[key].push(trip);
+    }
+  });
+
+  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(year - 1); } else { setMonth(month - 1); } setPopover(null); };
+  const nextMonth = () => { if (month === 11) { setMonth(0); setYear(year + 1); } else { setMonth(month + 1); } setPopover(null); };
+  const goToday = () => { setMonth(today.getMonth()); setYear(today.getFullYear()); };
+
+  const scheduled = trips.filter((t) => t.startDate && t.endDate);
+
+  return (
+    <section className="calendar-view">
+      <header className="calendar-header">
+        <button className="quiet" onClick={goToday} aria-label="Hari ini">Hari ini</button>
+        <div className="calendar-nav">
+          <button onClick={prevMonth} aria-label="Bulan sebelumnya">‹</button>
+          <h2>{MONTHS[month]} {year}</h2>
+          <button onClick={nextMonth} aria-label="Bulan berikutnya">›</button>
+        </div>
+        <span className="calendar-count">{scheduled.length} itinerary</span>
+      </header>
+      {!scheduled.length ? (
+        <div className="empty card" style={{marginTop: 16}}>
+          <span className="empty-mark">📅</span>
+          <h2>Belum ada itinerary terjadwal</h2>
+          <p>Buat itinerary dengan tanggal mulai dan selesai agar muncul di kalender.</p>
+          <button className="primary" onClick={create}>Buat itinerary pertama</button>
+        </div>
+      ) : (
+        <div className="calendar-grid">
+          {DAYS.map((d) => <div key={d} className="calendar-day-label">{d}</div>)}
+          {Array.from({ length: rows * 7 }, (_, i) => {
+            const dayNum = i - startPad + 1;
+            const isValid = dayNum >= 1 && dayNum <= totalDays;
+            const dateKey = isValid ? `${year}-${String(month + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}` : null;
+            const dayTrips = dateKey ? (tripsByDate[dateKey] || []) : [];
+            const isToday = isValid && dayNum === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+            const isWeekend = i % 7 >= 5;
+            return (
+              <button
+                key={i}
+                className={`calendar-day${isToday ? " today" : ""}${!isValid ? " empty" : ""}${isWeekend ? " weekend" : ""}`}
+                disabled={!isValid || !dayTrips.length}
+                onClick={() => dayTrips.length ? setPopover(popover === dateKey ? null : dateKey) : null}
+              >
+                {isValid && <span className="calendar-date">{dayNum}</span>}
+                {isValid && dayTrips.length > 0 && (
+                  <div className="calendar-dots">
+                    {dayTrips.slice(0, 4).map((t, j) => (
+                      <span key={t.id} className="calendar-dot" style={{background: TONE_COLORS[j % TONE_COLORS.length]}} />
+                    ))}
+                    {dayTrips.length > 4 && <span className="calendar-dot more">+{dayTrips.length - 4}</span>}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {popover && tripsByDate[popover] && (
+        <div className="calendar-popover-backdrop" onClick={() => setPopover(null)}>
+          <div className="calendar-popover card" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <h3>{dateLabel(popover)}</h3>
+              <button onClick={() => setPopover(null)} aria-label="Tutup">×</button>
+            </header>
+            <div className="calendar-popover-list">
+              {tripsByDate[popover].map((trip) => {
+                const done = trip.tasks.filter((t) => t.done).length;
+                return (
+                  <button key={trip.id} className="calendar-popover-item" onClick={() => { setPopover(null); openTrip(trip.id); }}>
+                    <span className="calendar-popover-monogram" style={{background: TONE_COLORS[trip.destination?.length % TONE_COLORS.length]}}>{trip.destination?.slice(0, 2).toUpperCase()}</span>
+                    <div>
+                      <strong>{trip.title}</strong>
+                      <small>{trip.people} orang · {done}/{trip.tasks.length} tugas</small>
+                    </div>
+                    <span className="calendar-popover-arrow">→</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function BottomNav({ nav, openTrip, selectedId, trips, view }) {
