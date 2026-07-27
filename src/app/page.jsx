@@ -786,20 +786,16 @@ const TONE_COLORS = ["#176554", "#b85d47", "#596e5b", "#6366f1", "#e47759", "#0e
 
 function CalendarView({ trips, openTrip, create }) {
   const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
   const [month, setMonth] = useState(today.getMonth());
   const [year, setYear] = useState(today.getFullYear());
-  const [popover, setPopover] = useState(null);
+  const [selectedTrip, setSelectedTrip] = useState(null);
+  const [activeDay, setActiveDay] = useState(null);
 
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const startPad = (firstDay.getDay() + 6) % 7;
-  const totalDays = lastDay.getDate();
-  const totalCells = startPad + totalDays;
-  const rows = Math.ceil(totalCells / 7);
+  const scheduled = trips.filter((t) => t.startDate && t.endDate);
 
   const tripsByDate = {};
-  trips.forEach((trip) => {
-    if (!trip.startDate || !trip.endDate) return;
+  scheduled.forEach((trip) => {
     const start = new Date(trip.startDate + "T00:00:00");
     const end = new Date(trip.endDate + "T23:59:59");
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -809,88 +805,218 @@ function CalendarView({ trips, openTrip, create }) {
     }
   });
 
-  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(year - 1); } else { setMonth(month - 1); } setPopover(null); };
-  const nextMonth = () => { if (month === 11) { setMonth(0); setYear(year + 1); } else { setMonth(month + 1); } setPopover(null); };
+  const currentMonthStart = `${year}-${String(month + 1).padStart(2, "0")}`;
+  const nextMonth = month === 11 ? 0 : month + 1;
+  const nextYear = month === 11 ? year + 1 : year;
+  const nextMonthStart = `${nextYear}-${String(nextMonth + 1).padStart(2, "0")}`;
+
+  const partitionByMonth = (list) => {
+    const thisM = [];
+    const nextM = [];
+    list.forEach((trip) => {
+      const start = trip.startDate.slice(0, 7);
+      const end = trip.endDate.slice(0, 7);
+      if (start === currentMonthStart || end === currentMonthStart) thisM.push(trip);
+      else if (start === nextMonthStart || end === nextMonthStart) nextM.push(trip);
+    });
+    return { thisMonth: thisM, nextMonth: nextM };
+  };
+
+  const { thisMonth, nextMonth: nextMonthTrips } = partitionByMonth(scheduled);
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startPad = (firstDay.getDay() + 6) % 7;
+  const totalDays = lastDay.getDate();
+  const totalCells = startPad + totalDays;
+  const rows = Math.ceil(totalCells / 7);
+
+  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(year - 1); } else { setMonth(month - 1); } setActiveDay(null); };
+  const nextMonthNav = () => { if (month === 11) { setMonth(0); setYear(year + 1); } else { setMonth(month + 1); } setActiveDay(null); };
   const goToday = () => { setMonth(today.getMonth()); setYear(today.getFullYear()); };
 
-  const scheduled = trips.filter((t) => t.startDate && t.endDate);
+  const handleDayClick = (dateKey, dayTrips) => {
+    if (!dayTrips.length) return;
+    setActiveDay(activeDay === dateKey ? null : dateKey);
+    setSelectedTrip(dayTrips[0]);
+  };
+
+  const monogram = (dest) => dest?.slice(0, 2).toUpperCase() || "??";
+  const colorForTrip = (trip) => TONE_COLORS[trip.destination?.length % TONE_COLORS.length];
+
+  const TripScheduleCard = ({ trip }) => {
+    const done = trip.tasks.filter((t) => t.done).length;
+    const total = trip.tasks.length;
+    const pct = total ? Math.round(done / total * 100) : 0;
+    return (
+      <button className="sched-card" onClick={() => { setSelectedTrip(trip); setActiveDay(null); }}>
+        <span className="sched-mono" style={{ background: colorForTrip(trip) }}>{monogram(trip.destination)}</span>
+        <div className="sched-body">
+          <strong className="sched-title">{trip.title}</strong>
+          <span className="sched-dest">{trip.destination}</span>
+          <span className="sched-date">{dateFormat(trip.startDate)} - {dateFormat(trip.endDate)}</span>
+        </div>
+        <div className="sched-right">
+          <div className="sched-meta">
+            <span className="sched-people">{trip.people} orang</span>
+            <span className="sched-tasks">{done}/{total}</span>
+          </div>
+          <div className="sched-bar">
+            <div className="sched-bar-fill" style={{ width: `${pct}%`, background: pct === 100 ? "#176554" : "#4f46e5" }} />
+          </div>
+        </div>
+        <span className="sched-arrow">→</span>
+      </button>
+    );
+  };
+
+  const dayTripsForActive = activeDay ? (tripsByDate[activeDay] || []) : [];
 
   return (
-    <section className="calendar-view">
-      <header className="calendar-header">
-        <button className="quiet" onClick={goToday} aria-label="Hari ini">Hari ini</button>
-        <div className="calendar-nav">
-          <button onClick={prevMonth} aria-label="Bulan sebelumnya">‹</button>
-          <h2>{MONTHS[month]} {year}</h2>
-          <button onClick={nextMonth} aria-label="Bulan berikutnya">›</button>
+    <section className="scheduler-layout">
+      <div className="scheduler-sidebar">
+        <div className="scheduler-sidebar-header">
+          <span className="sched-icon">📅</span>
+          <h2>Jadwal Mendatang</h2>
         </div>
-        <span className="calendar-count">{scheduled.length} itinerary</span>
-      </header>
-      {!scheduled.length ? (
-        <div className="empty card" style={{marginTop: 16}}>
-          <span className="empty-mark">📅</span>
-          <h2>Belum ada itinerary terjadwal</h2>
-          <p>Buat itinerary dengan tanggal mulai dan selesai agar muncul di kalender.</p>
-          <button className="primary" onClick={create}>Buat itinerary pertama</button>
+        <div className="scheduler-sections">
+          <div className="sched-section">
+            <h3>Bulan Ini <span className="sched-badge">{thisMonth.length}</span></h3>
+            {thisMonth.length === 0 ? (
+              <div className="sched-empty-small">
+                <p>Tidak ada itinerary di bulan ini.</p>
+                <button className="primary small" onClick={create}>+ Buat itinerary</button>
+              </div>
+            ) : (
+              thisMonth.map((trip) => <TripScheduleCard key={trip.id} trip={trip} />)
+            )}
+          </div>
+          <div className="sched-section">
+            <h3>Bulan Depan <span className="sched-badge">{nextMonthTrips.length}</span></h3>
+            {nextMonthTrips.length === 0 ? (
+              <p className="sched-empty-text">Belum ada rencana untuk bulan depan.</p>
+            ) : (
+              nextMonthTrips.map((trip) => <TripScheduleCard key={trip.id} trip={trip} />)
+            )}
+          </div>
         </div>
-      ) : (
-        <div className="calendar-grid">
-          {DAYS.map((d) => <div key={d} className="calendar-day-label">{d}</div>)}
-          {Array.from({ length: rows * 7 }, (_, i) => {
-            const dayNum = i - startPad + 1;
-            const isValid = dayNum >= 1 && dayNum <= totalDays;
-            const dateKey = isValid ? `${year}-${String(month + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}` : null;
-            const dayTrips = dateKey ? (tripsByDate[dateKey] || []) : [];
-            const isToday = isValid && dayNum === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-            const isWeekend = i % 7 >= 5;
-            return (
-              <button
-                key={i}
-                className={`calendar-day${isToday ? " today" : ""}${!isValid ? " empty" : ""}${isWeekend ? " weekend" : ""}`}
-                disabled={!isValid || !dayTrips.length}
-                onClick={() => dayTrips.length ? setPopover(popover === dateKey ? null : dateKey) : null}
-              >
-                {isValid && <span className="calendar-date">{dayNum}</span>}
-                {isValid && dayTrips.length > 0 && (
-                  <div className="calendar-dots">
-                    {dayTrips.slice(0, 4).map((t, j) => (
-                      <span key={t.id} className="calendar-dot" style={{background: TONE_COLORS[j % TONE_COLORS.length]}} />
-                    ))}
-                    {dayTrips.length > 4 && <span className="calendar-dot more">+{dayTrips.length - 4}</span>}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
-      {popover && tripsByDate[popover] && (
-        <div className="calendar-popover-backdrop" onClick={() => setPopover(null)}>
-          <div className="calendar-popover card" onClick={(e) => e.stopPropagation()}>
-            <header>
-              <h3>{dateLabel(popover)}</h3>
-              <button onClick={() => setPopover(null)} aria-label="Tutup">×</button>
-            </header>
-            <div className="calendar-popover-list">
-              {tripsByDate[popover].map((trip) => {
-                const done = trip.tasks.filter((t) => t.done).length;
+      </div>
+
+      <div className="scheduler-main">
+        <div className="scheduler-calendar">
+          <div className="calendar-toolbar">
+            <button className="calendar-today-btn" onClick={goToday}>Hari ini</button>
+            <div className="calendar-month-nav">
+              <button onClick={prevMonth} aria-label="Bulan sebelumnya">‹</button>
+              <h2>{MONTHS[month]} {year}</h2>
+              <button onClick={nextMonthNav} aria-label="Bulan berikutnya">›</button>
+            </div>
+            <span className="calendar-total">{scheduled.length} ITINERARY</span>
+          </div>
+
+          {!scheduled.length ? (
+            <div className="empty card" style={{ marginTop: 16 }}>
+              <span className="empty-mark">📅</span>
+              <h2>Belum ada itinerary terjadwal</h2>
+              <p>Buat itinerary dengan tanggal mulai dan selesai agar muncul di kalender.</p>
+              <button className="primary" onClick={create}>Buat itinerary pertama</button>
+            </div>
+          ) : (
+            <div className="calendar-grid">
+              {DAYS.map((d) => <div key={d} className="calendar-day-label">{d}</div>)}
+              {Array.from({ length: rows * 7 }, (_, i) => {
+                const dayNum = i - startPad + 1;
+                const isValid = dayNum >= 1 && dayNum <= totalDays;
+                const dateKey = isValid ? `${year}-${String(month + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}` : null;
+                const dayTrips = dateKey ? (tripsByDate[dateKey] || []) : [];
+                const isToday = isValid && dateKey === todayStr;
+                const isWeekend = i % 7 >= 5;
+                const isActive = dateKey && dateKey === activeDay;
                 return (
-                  <button key={trip.id} className="calendar-popover-item" onClick={() => { setPopover(null); openTrip(trip.id); }}>
-                    <span className="calendar-popover-monogram" style={{background: TONE_COLORS[trip.destination?.length % TONE_COLORS.length]}}>{trip.destination?.slice(0, 2).toUpperCase()}</span>
-                    <div>
-                      <strong>{trip.title}</strong>
-                      <small>{trip.people} orang · {done}/{trip.tasks.length} tugas</small>
-                    </div>
-                    <span className="calendar-popover-arrow">→</span>
+                  <button
+                    key={i}
+                    className={`calendar-day${isToday ? " today" : ""}${!isValid ? " empty" : ""}${isWeekend ? " weekend" : ""}${isActive ? " active" : ""}${dayTrips.length ? " has-trip" : ""}`}
+                    disabled={!isValid || !dayTrips.length}
+                    onClick={() => handleDayClick(dateKey, dayTrips)}
+                  >
+                    {isValid && <span className="calendar-date">{dayNum}</span>}
+                    {isValid && dayTrips.length > 0 && (
+                      <div className="calendar-dots">
+                        {dayTrips.slice(0, 3).map((t, j) => (
+                          <span key={t.id} className="calendar-dot" style={{ background: TONE_COLORS[j % TONE_COLORS.length] }} />
+                        ))}
+                        {dayTrips.length > 3 && <span className="calendar-dot more">+{dayTrips.length - 3}</span>}
+                      </div>
+                    )}
                   </button>
                 );
               })}
             </div>
-          </div>
+          )}
         </div>
-      )}
+
+        {(selectedTrip || dayTripsForActive.length > 0) && (
+          <div className="trip-detail-card card">
+            {selectedTrip ? (
+              <>
+                <div className="tdc-header">
+                  <span className="tdc-mono" style={{ background: colorForTrip(selectedTrip) }}>{monogram(selectedTrip.destination)}</span>
+                  <div>
+                    <h3>{selectedTrip.title}</h3>
+                    <div className="tdc-meta-row">
+                      <span>{dateFormat(selectedTrip.startDate)} - {dateFormat(selectedTrip.endDate)}</span>
+                      <span>{selectedTrip.people} orang</span>
+                    </div>
+                  </div>
+                  <button className="tdc-open-btn" onClick={() => openTrip(selectedTrip.id)}>Edit Itinerary</button>
+                </div>
+                <div className="tdc-tasks">
+                  <h4>Task List</h4>
+                  {selectedTrip.tasks.length === 0 ? (
+                    <p className="sched-empty-text">Belum ada tugas.</p>
+                  ) : (
+                    selectedTrip.tasks.map((task, idx) => (
+                      <label key={idx} className={`tdc-task ${task.done ? "done" : ""}`}>
+                        <span className="tdc-checkbox">{task.done ? "✓" : "○"}</span>
+                        <span>{task.text}</span>
+                        {task.note && <small>{task.note}</small>}
+                      </label>
+                    ))
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <h4>{activeDay ? `Trip pada ${dateLabel(activeDay)}` : "Detail Trip"}</h4>
+                <div className="calendar-popover-list">
+                  {dayTripsForActive.map((trip) => {
+                    const done = trip.tasks.filter((t) => t.done).length;
+                    return (
+                      <button key={trip.id} className="calendar-popover-item" onClick={() => { setSelectedTrip(trip); }}>
+                        <span className="calendar-popover-monogram" style={{ background: colorForTrip(trip) }}>{monogram(trip.destination)}</span>
+                        <div>
+                          <strong>{trip.title}</strong>
+                          <small>{trip.people} orang · {done}/{trip.tasks.length} tugas</small>
+                        </div>
+                        <span className="calendar-popover-arrow">→</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </section>
   );
+}
+
+function dateFormat(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00:00");
+  const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 function BottomNav({ nav, openTrip, selectedId, trips, view }) {
