@@ -1,0 +1,35 @@
+{
+  "name": "itenary-serenity",
+  "version": "1.0.0",
+  "description": "AI-powered itinerary and event planner",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "firebase": "firebase",
+    "firebase:login": "firebase login",
+    "firebase:projects": "firebase projects:list",
+    "firebase:use": "firebase use --add",
+    "firebase:check": "node --env-file=.env.local verify-firebase.mjs",
+    "firebase:emulators": "firebase emulators:start",
+    "firebase:deploy": "firebase deploy --only firestore:rules,firestore:indexes"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "module",
+  "dependencies": {
+    "firebase": "^12.16.0",
+    "next": "^16.2.12",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "firebase-tools": "^15.24.0"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.3"
+  }
+}

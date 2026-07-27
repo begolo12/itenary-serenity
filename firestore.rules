@@ -1,0 +1,128 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function member(workspaceId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid));
+    }
+
+    function role(workspaceId) {
+      return get(/databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid)).data.role;
+    }
+
+    function canEdit(workspaceId) {
+      return member(workspaceId) && role(workspaceId) in ['owner', 'editor'];
+    }
+
+    function owner(workspaceId) {
+      return member(workspaceId) && role(workspaceId) == 'owner';
+    }
+
+    function validPhoto() {
+      return request.resource.data.keys().hasOnly([
+          'createdAt', 'createdBy', 'height', 'mimeType', 'photoData', 'sizeBytes', 'width'
+        ])
+        && request.resource.data.photoData is string
+        // 300 KB binary becomes about 410 KB after Base64 encoding.
+        && request.resource.data.photoData.size() <= 410000
+        && request.resource.data.mimeType == 'image/webp'
+        && request.resource.data.sizeBytes is int
+        && request.resource.data.sizeBytes > 0
+        && request.resource.data.sizeBytes <= 307200
+        && request.resource.data.width is int
+        && request.resource.data.width > 0
+        && request.resource.data.height is int
+        && request.resource.data.height > 0;
+    }
+
+    match /users/{userId} {
+      allow create, read, update, delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /workspaces/{workspaceId} {
+      allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow read: if member(workspaceId);
+      allow update, delete: if owner(workspaceId);
+
+      match /members/{userId} {
+        allow read: if member(workspaceId);
+        allow create: if owner(workspaceId)
+          || (signedIn()
+            && userId == request.auth.uid
+            && request.resource.data.role == 'owner'
+            && get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid);
+        allow update, delete: if owner(workspaceId);
+      }
+
+      // AI credentials are server-only. Cloud Functions use Admin SDK and bypass these rules.
+      match /aiConnections/{connectionId} {
+        allow read, write: if false;
+      }
+
+      match /trips/{tripId} {
+        allow read: if member(workspaceId);
+        allow create, update, delete: if canEdit(workspaceId);
+
+        match /days/{dayId} {
+          allow read: if member(workspaceId);
+          allow create, update, delete: if canEdit(workspaceId);
+        }
+
+        match /activities/{activityId} {
+          allow read: if member(workspaceId);
+          allow create, update, delete: if canEdit(workspaceId);
+        }
+
+        match /budgetItems/{itemId} {
+          allow read: if member(workspaceId);
+          allow create, update, delete: if canEdit(workspaceId);
+        }
+
+        match /tasks/{taskId} {
+          allow read: if member(workspaceId);
+          allow create, update, delete: if canEdit(workspaceId);
+        }
+
+        match /documents/{documentId} {
+          allow read: if member(workspaceId);
+          allow create, update, delete: if canEdit(workspaceId);
+        }
+
+        match /comments/{commentId} {
+          allow read: if member(workspaceId);
+          allow create, update, delete: if canEdit(workspaceId);
+        }
+
+        match /versions/{versionId} {
+          allow read: if member(workspaceId);
+          allow create, update, delete: if canEdit(workspaceId);
+        }
+
+        match /photos/{photoId} {
+          allow read: if member(workspaceId);
+          allow create: if canEdit(workspaceId)
+            && validPhoto()
+            && request.resource.data.createdBy == request.auth.uid;
+          allow update: if canEdit(workspaceId)
+            && validPhoto()
+            && request.resource.data.createdBy == resource.data.createdBy;
+          allow delete: if canEdit(workspaceId);
+        }
+      }
+
+      match /generationJobs/{jobId} {
+        allow read: if member(workspaceId);
+        allow write: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
