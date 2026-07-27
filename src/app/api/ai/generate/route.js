@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
+import { parseStructuredAiContent } from "../../../../lib/ai-json";
 
 const buckets = new Map();
 const MAX_BODY = 20_000;
 const WINDOW_MS = 60_000;
 const MAX_REQUESTS = 6;
 const PROVIDERS = {
-  deepseek: { label: "DeepSeek", model: "deepseek-chat", endpoint: "https://api.deepseek.com/chat/completions" },
+  deepseek: { label: "DeepSeek", model: "deepseek-v4-flash", endpoint: "https://api.deepseek.com/chat/completions" },
   openai: { label: "OpenAI", model: "gpt-4o-mini", endpoint: "https://api.openai.com/v1/chat/completions" },
   gemini: { label: "Gemini", model: "gemini-2.0-flash" },
 };
@@ -38,11 +39,11 @@ function sanitizeBrief(brief) {
 function normalize(data) {
   if (!data || typeof data !== "object" || !Array.isArray(data.activities) || !Array.isArray(data.tasks) || !Array.isArray(data.expenses)) throw new Error("AI mengembalikan struktur yang tidak valid.");
   const activities = data.activities.slice(0, 80).map((item) => ({
-    id: crypto.randomUUID(), day: cleanText(item?.day, 30) || "Hari 1", time: cleanText(item?.time, 10) || "09:00",
-    title: cleanText(item?.title, 160), note: cleanText(item?.note, 500),
+    id: crypto.randomUUID(), day: cleanText(item?.day, 40) || "Hari 1", time: cleanText(item?.time, 10) || "09:00",
+    title: cleanText(item?.title, 160), note: cleanText(item?.note, 800),
   })).filter((item) => item.title);
-  const tasks = data.tasks.slice(0, 80).map((item) => ({ id: crypto.randomUUID(), title: cleanText(item?.title, 180), done: false })).filter((item) => item.title);
-  const expenses = data.expenses.slice(0, 50).map((item) => ({ id: crypto.randomUUID(), category: cleanText(item?.category, 100), amount: Math.max(0, Math.round(Number(item?.amount) || 0)) })).filter((item) => item.category);
+  const tasks = data.tasks.slice(0, 120).map((item) => ({ id: crypto.randomUUID(), title: cleanText(item?.title, 250), done: false })).filter((item) => item.title);
+  const expenses = data.expenses.slice(0, 80).map((item) => ({ id: crypto.randomUUID(), category: cleanText(item?.category, 200), amount: Math.max(0, Math.round(Number(item?.amount) || 0)) })).filter((item) => item.category);
   if (!activities.length || !tasks.length || !expenses.length) throw new Error("Hasil AI tidak cukup lengkap.");
   return { activities, tasks, expenses };
 }
@@ -63,10 +64,10 @@ export async function POST(request) {
     const brief = sanitizeBrief(body.brief);
     const test = body.action === "test";
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25_000);
+    const timeout = setTimeout(() => controller.abort(), 30_000);
     let response;
     try {
-      const system = "Return strict JSON only. Use exactly: {activities:[{day,time,title,note}],tasks:[{title}],expenses:[{category,amount}]}. Use Indonesian. Amounts are integer IDR estimates and must respect the total budget.";
+      const system = "You are an expert Indonesian travel planner. Return ONLY valid json. RULES: Amounts integer IDR, total MUST NOT exceed budget. Cover EVERY day with 3-5 activities with times (HH:MM). CRITICAL: Routes must be geographically possible (e.g. Depok-Sukabumi needs transit Bogor). Each note: specific location, transport mode, duration, tip. Generate 15-25 tasks: docs, health, packing, bookings, reminders. Expenses 8-15 items: transport, akomodasi, makan, tickets, local transport, tips, insurance, emergency 10%. Use Indonesian. Be specific and practical.";
       const prompt = test ? `Return one short item per array to test connectivity. Context: ${JSON.stringify(brief)}` : `Create a practical itinerary from this sanitized brief: ${JSON.stringify(brief)}`;
       if (providerKey === "gemini") {
         response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${provider.model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
@@ -76,7 +77,7 @@ export async function POST(request) {
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: system }] },
             contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: { temperature: test ? 0 : 0.4, maxOutputTokens: test ? 150 : 3500, responseMimeType: "application/json" },
+            generationConfig: { temperature: test ? 0 : 0.4, maxOutputTokens: test ? 150 : 8000, responseMimeType: "application/json" },
           }),
         });
       } else {
@@ -85,7 +86,7 @@ export async function POST(request) {
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
           signal: controller.signal,
           body: JSON.stringify({
-            model: provider.model, temperature: test ? 0 : 0.4, max_tokens: test ? 150 : 3500,
+            model: provider.model, temperature: test ? 0 : 0.4, max_tokens: test ? 150 : 8000,
             response_format: { type: "json_object" },
             messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
           }),
@@ -101,7 +102,7 @@ export async function POST(request) {
     const payload = await response.json();
     const content = providerKey === "gemini" ? payload?.candidates?.[0]?.content?.parts?.[0]?.text : payload?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || content.length > 100_000) throw new Error("Respons AI kosong atau terlalu besar.");
-    const result = normalize(JSON.parse(content));
+    const result = normalize(parseStructuredAiContent(content));
     return NextResponse.json(test ? { ok: true, provider: providerKey, model: provider.model } : { ...result, provider: providerKey, model: provider.model });
   } catch (error) {
     const message = error?.name === "AbortError" ? "Provider AI melewati batas waktu 25 detik." : error instanceof SyntaxError ? "AI tidak mengembalikan JSON valid." : error.message || "Permintaan AI gagal.";

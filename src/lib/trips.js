@@ -16,13 +16,13 @@ export function validateTrip(form) {
   }
   if (form.endDate < form.startDate) return "Tanggal selesai tidak boleh sebelum tanggal mulai.";
   if (!Number.isFinite(Number(form.people)) || Number(form.people) < 1) return "Jumlah orang minimal 1.";
-  if (!Number.isFinite(Number(form.budget)) || Number(form.budget) < 0) return "Anggaran tidak boleh negatif.";
+  if (!Number.isFinite(Number(String(form.budget).replace(/[^0-9]/g, ""))) || Number(String(form.budget).replace(/[^0-9]/g, "")) < 0) return "Anggaran tidak boleh negatif.";
   return "";
 }
 
 export function createTemplate(form) {
   const destination = form.destination.trim();
-  const budget = Number(form.budget || 0);
+  const budget = Number(String(form.budget || 0).replace(/[^0-9]/g, ""));
   const now = new Date().toISOString();
   return {
     ...form,

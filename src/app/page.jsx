@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { compressPhotoForFirestore } from "../lib/image-compression";
+import { deleteProviderKey, loadProviderKey, saveProviderKey } from "../lib/secure-key-store";
 import {
   bootstrapWorkspace, createCloudAccount, deleteCloudTrip, saveCloudTrip,
   signInToCloud, signInWithCloudAccount, signOutFromCloud, watchAuth, watchCloudTrips,
@@ -17,7 +18,7 @@ const tabs = [
 ];
 const CLOUD_UID_KEY = "serenity-itinerary-cloud-uid";
 const AI_PROVIDERS = {
-  deepseek: { label: "DeepSeek", model: "deepseek-chat" },
+  deepseek: { label: "DeepSeek", model: "deepseek-v4-flash" },
   openai: { label: "OpenAI", model: "gpt-4o-mini" },
   gemini: { label: "Gemini", model: "gemini-2.0-flash" },
 };
@@ -37,6 +38,7 @@ export default function Home() {
   const [cloudError, setCloudError] = useState("");
   const cloudUnsubscribe = useRef(null);
   const deletedIds = useRef(new Set());
+  const autoAuthAttempted = useRef(false);
 
   const toast = (message, kind = "success") => setNotice({ message, kind });
 
@@ -66,6 +68,14 @@ export default function Home() {
     setCloudError("");
     if (!currentUser) {
       setCloudState("local");
+      if (!autoAuthAttempted.current) {
+        autoAuthAttempted.current = true;
+        setCloudState("connecting");
+        signInToCloud().catch((error) => {
+          setCloudState("error");
+          setCloudError(authMessage(error));
+        });
+      }
       return;
     }
     const previousUid = localStorage.getItem(CLOUD_UID_KEY);
@@ -126,6 +136,15 @@ export default function Home() {
     window.addEventListener("offline", offline);
     return () => { window.removeEventListener("online", online); window.removeEventListener("offline", offline); };
   }, [user]);
+
+  useEffect(() => {
+    let active = true;
+    setApiKey("");
+    loadProviderKey(aiProvider)
+      .then((savedKey) => { if (active) setApiKey(savedKey); })
+      .catch(() => { if (active) toast("Kunci tersimpan tidak dapat dibuka pada perangkat ini.", "error"); });
+    return () => { active = false; };
+  }, [aiProvider]);
 
   const selected = trips.find((trip) => trip.id === selectedId);
   const nav = (target) => setView(target);
@@ -229,6 +248,36 @@ function TripCard({ trip, index, openTrip }) {
   </button>;
 }
 
+const INDONESIAN_CITIES = [
+  "Jakarta", "Bandung", "Surabaya", "Yogyakarta", "Semarang", "Medan", "Makassar",
+  "Palembang", "Denpasar", "Bali", "Malang", "Solo", "Batam", "Padang", "Pekanbaru",
+  "Balikpapan", "Banjarmasin", "Manado", "Pontianak", "Samarinda", "Lombok", "Bogor",
+  "Depok", "Tangerang", "Bekasi", "Labuan Bajo", "Raja Ampat", "Bandar Lampung",
+  "Jambi", "Ambon", "Jayapura", "Aceh", "Banda Aceh", "Kupang", "Mataram",
+  "Manokwari", "Sorong", "Ternate", "Palu", "Kendari", "Gorontalo", "Mamuju",
+  "Tanjung Pinang", "Pangkal Pinang", "Bengkulu", "Palangkaraya", "Tarakan",
+  "Tanjung Selor", "Cirebon", "Tasikmalaya", "Purwokerto", "Magelang", "Salatiga",
+  "Batu", "Kediri", "Madiun", "Probolinggo", "Banyuwangi", "Jember", "Garut", "Sukabumi",
+];
+function CityAutocomplete({ value, onChange, placeholder }) {
+  const [input, setInput] = useState(value || "");
+  const [show, setShow] = useState(false);
+  const ref = useRef(null);
+  const filtered = INDONESIAN_CITIES.filter((c) => c.toLowerCase().includes(input.toLowerCase())).slice(0, 5);
+  useEffect(() => {
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setShow(false); }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+  return <div ref={ref} className="city-autocomplete"><input type="text" value={input} onChange={(e) => { setInput(e.target.value); setShow(true); }} onFocus={() => setShow(true)} placeholder={placeholder} /><button type="button" className="clear-input" onClick={() => { setInput(""); onChange(""); }} hidden={!input}>&times;</button>{show && input && filtered.length > 0 && <ul className="city-suggestions">{filtered.map((c) => <li key={c} onMouseDown={() => { setInput(c); onChange(c); setShow(false); }}>{c}</li>)}</ul>}</div>;
+}
+
+const formatBudget = (value) => {
+  const num = String(value || "").replace(/[^0-9]/g, "");
+  if (!num) return "";
+  return Number(num).toLocaleString("id-ID");
+};
+
 function TripCreator({ apiKey, provider, addTrip, cancel, toast }) {
   const [form, setForm] = useState({ ...blankTrip });
   const [error, setError] = useState("");
@@ -244,7 +293,7 @@ function TripCreator({ apiKey, provider, addTrip, cancel, toast }) {
   const makeAi = async () => {
     const message = validateTrip(form);
     if (message) { setError(message); return; }
-    if (!apiKey) { setError(`Masukkan kunci API ${AI_PROVIDERS[provider].label} memory-only di Pengaturan.`); return; }
+    if (!apiKey) { setError(`Masukkan dan simpan kunci API ${AI_PROVIDERS[provider].label} di Pengaturan.`); return; }
     setGenerating(true); setError("");
     try {
       const response = await fetch("/api/ai/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, apiKey, brief: form }) });
@@ -259,13 +308,13 @@ function TripCreator({ apiKey, provider, addTrip, cancel, toast }) {
     <p className="lead">Isi detail inti. Pilih template lokal yang deterministik atau buat draft AI dengan provider aktif dan kunci dari memori halaman ini.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="form-grid">
-      <Field label="Kota asal" value={form.origin} onChange={(value) => field("origin", value)} required />
-      <Field label="Tujuan" value={form.destination} onChange={(value) => field("destination", value)} placeholder="Mis. Yogyakarta" required />
+      <label>Kota asal<CityAutocomplete value={form.origin} onChange={(value) => field("origin", value)} placeholder="Cari kota asal..." /></label>
+      <label>Tujuan<CityAutocomplete value={form.destination} onChange={(value) => field("destination", value)} placeholder="Cari kota tujuan..." /></label>
       <Field label="Tanggal mulai" type="date" value={form.startDate} onChange={(value) => field("startDate", value)} required />
       <Field label="Tanggal selesai" type="date" min={form.startDate} value={form.endDate} onChange={(value) => field("endDate", value)} required />
       <Field label="Jumlah orang" type="number" min="1" step="1" value={form.people} onChange={(value) => field("people", value)} required />
-      <label>Jenis perjalanan<select value={form.purpose} onChange={(event) => field("purpose", event.target.value)}><option>Leisure</option><option>Bisnis</option><option>Keluarga</option><option>Retreat</option><option>Study tour</option></select></label>
-      <Field label="Anggaran total (IDR)" type="number" min="0" value={form.budget} onChange={(value) => field("budget", value)} required />
+      <label>Jenis perjalanan<input list="purpose-list" value={form.purpose} onChange={(event) => field("purpose", event.target.value)} placeholder="Mis. Leisure, Bisnis, atau ketik sendiri..." /><datalist id="purpose-list"><option value="Leisure" /><option value="Bisnis" /><option value="Keluarga" /><option value="Backpacker" /><option value="Honeymoon" /><option value="Retreat" /><option value="Study tour" /><option value="Adventure" /><option value="Kuliner" /><option value="Budaya & Sejarah" /></datalist></label>
+      <label>Anggaran total (IDR)<input type="text" inputMode="numeric" value={formatBudget(form.budget)} onChange={(event) => { const raw = event.target.value.replace(/[^0-9]/g, ""); field("budget", raw); }} placeholder="Mis. 5.000.000" required /></label>
     </div>
     <div className="ai-choice"><span className="spark">✦</span><div><strong>{AI_PROVIDERS[provider].label} · {AI_PROVIDERS[provider].model}</strong><p>{apiKey ? "Kunci tersedia hanya selama halaman ini terbuka." : "Belum ada kunci di memori. Template lokal tetap tersedia."}</p></div></div>
     <footer><button type="button" className="quiet" onClick={cancel}>Batal</button><button type="submit" className="outline">Gunakan template lokal</button><button type="button" className="primary" onClick={makeAi} disabled={generating}>{generating ? "Menyusun draft..." : `Buat dengan ${AI_PROVIDERS[provider].label}`}</button></footer>
@@ -307,7 +356,7 @@ function TripDetail({ trip, tab, setTab, updateTrip, removeTrip, toast, cloudRea
     </section>
     <div className="tabs" role="tablist" aria-label="Bagian itinerary">{tabs.map(([key, label]) => <button role="tab" aria-selected={tab === key} key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div>
     {tab === "overview" && <Overview trip={trip} spent={spent} completed={completed} setTab={setTab} />}
-    {tab === "rundown" && <Rundown trip={trip} setModal={setModal} removeItem={removeItem} />}
+    {tab === "rundown" && <Rundown trip={trip} setModal={setModal} removeItem={removeItem} updateTrip={updateTrip} toast={toast} />}
     {tab === "budget" && <Budget trip={trip} spent={spent} setModal={setModal} removeItem={removeItem} />}
     {tab === "checklist" && <Checklist trip={trip} completed={completed} updateList={updateList} setModal={setModal} removeItem={removeItem} />}
     <PrintSheet trip={trip} spent={spent} />
@@ -329,26 +378,118 @@ function PrintSheet({ trip, spent }) {
 
 function Overview({ trip, spent, completed, setTab }) {
   const remaining = Number(trip.budget) - spent;
+  const doneActs = trip.activities.filter((a) => a.done).length;
+  const actProgress = trip.activities.length ? Math.round(doneActs / trip.activities.length * 100) : 0;
   return <section className="overview-grid">
     <article className="card stat-card"><p className="eyebrow">ANGGARAN TERPAKAI</p><strong>{rupiah(spent)}</strong><p className={remaining < 0 ? "negative" : ""}>{remaining < 0 ? `${rupiah(Math.abs(remaining))} melebihi batas` : `${rupiah(remaining)} tersisa`}</p><div className="bar"><i style={{ width: `${Math.min(100, spent / Number(trip.budget || 1) * 100)}%` }} /></div><button className="text-button" onClick={() => setTab("budget")}>Lihat rincian →</button></article>
-    <article className="card stat-card"><p className="eyebrow">KESIAPAN</p><strong>{completed}<small> / {trip.tasks.length}</small></strong><p>Tugas selesai</p><div className="bar pine"><i style={{ width: `${trip.tasks.length ? completed / trip.tasks.length * 100 : 0}%` }} /></div><button className="text-button" onClick={() => setTab("checklist")}>Buka checklist →</button></article>
+    <article className="card stat-card"><p className="eyebrow">KESIAPAN CHECKLIST</p><strong>{completed}<small> / {trip.tasks.length}</small></strong><p>Tugas selesai</p><div className="bar pine"><i style={{ width: `${trip.tasks.length ? completed / trip.tasks.length * 100 : 0}%` }} /></div><button className="text-button" onClick={() => setTab("checklist")}>Buka checklist →</button></article>
+    <article className="card stat-card"><p className="eyebrow">PROGRES TIMELINE</p><strong>{doneActs}<small> / {trip.activities.length}</small></strong><p>Aktivitas selesai ({actProgress}%)</p><div className="bar coral"><i style={{ width: `${actProgress}%` }} /></div><button className="text-button" onClick={() => setTab("rundown")}>Lihat timeline →</button></article>
     <article className="card next-card"><p className="eyebrow">AGENDA PERTAMA</p>{trip.activities[0] ? <><span>{trip.activities[0].day} · {trip.activities[0].time}</span><h3>{trip.activities[0].title}</h3><p>{trip.activities[0].note}</p></> : <p>Belum ada aktivitas.</p>}<button className="text-button" onClick={() => setTab("rundown")}>Lihat timeline →</button></article>
   </section>;
 }
 
-function Rundown({ trip, setModal, removeItem }) {
-  return <section className="panel"><PanelHead eyebrow="ALUR PERJALANAN" title="Rundown" action="＋ Tambah aktivitas" onAction={() => setModal({ type: "activity", item: null })} /><div className="export-row"><button className="quiet" onClick={() => downloadIcs(trip)}>Ekspor kalender .ics</button></div>{!trip.activities.length ? <p className="panel-empty">Belum ada aktivitas.</p> : <div className="timeline">{trip.activities.map((item) => <article key={item.id}><div className="timeline-time"><b>{item.time}</b><span>{item.day}</span></div><i /><div className="timeline-card card"><h3>{item.title}</h3><p>{item.note || "Tanpa catatan"}</p><div><button className="mini" onClick={() => setModal({ type: "activity", item })}>Edit</button><button className="mini danger" onClick={() => removeItem("activities", item.id, "aktivitas")}>Hapus</button></div></div></article>)}</div>}</section>;
+function Rundown({ trip, setModal, removeItem, updateTrip, toast, compressing }) {
+  const photoRefs = useRef({});
+  const [expandedPhotos, setExpandedPhotos] = useState({});
+  const now = new Date();
+  const tripStart = new Date(`${trip.startDate}T00:00:00`);
+  const doneActivities = trip.activities.filter((a) => a.done).length;
+  const progress = trip.activities.length ? Math.round(doneActivities / trip.activities.length * 100) : 0;
+  
+  const toggleDone = (id) => {
+    const updated = trip.activities.map((a) => a.id === id ? { ...a, done: !a.done } : a);
+    updateTrip({ activities: updated });
+  };
+
+  const uploadPhoto = async (activityId, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const photo = await compressPhotoForFirestore(file);
+      const updated = trip.activities.map((a) => {
+        if (a.id !== activityId) return a;
+        const photos = a.photos || [];
+        return { ...a, photos: [...photos, { ...photo, id: crypto.randomUUID(), uploadedAt: new Date().toISOString() }] };
+      });
+      updateTrip({ activities: updated });
+      toast(`Foto dikompresi ${Math.round(photo.sizeBytes / 1024)} KB`);
+    } catch (error) { toast(error.message, "error"); }
+    event.target.value = "";
+  };
+
+  const toggleExpandPhotos = (activityId) => {
+    setExpandedPhotos((prev) => ({ ...prev, [activityId]: !prev[activityId] }));
+  };
+
+  const getStatus = (activity) => {
+    if (activity.done) return { label: "Selesai", cls: "done" };
+    const dayNum = Math.max(1, Number(activity.day?.match(/\d+/)?.[0] || 1));
+    const [h, m] = String(activity.time || "09:00").split(":").map(Number);
+    const actDate = new Date(tripStart);
+    actDate.setDate(actDate.getDate() + dayNum - 1);
+    actDate.setHours(h || 9, m || 0, 0, 0);
+    if (actDate < now) return { label: "Terlambat", cls: "late" };
+    const diffMs = actDate - now;
+    const diffHrs = diffMs / 3600000;
+    if (diffHrs <= 2) return { label: `Dalam ${Math.round(diffHrs * 60)} menit`, cls: "soon" };
+    return { label: "Mendatang", cls: "upcoming" };
+  };
+
+  return <section className="panel">
+    <PanelHead eyebrow="ALUR PERJALANAN" title="Rundown" action="＋ Tambah aktivitas" onAction={() => setModal({ type: "activity", item: null })} />
+    <div className="export-row"><button className="quiet" onClick={() => downloadIcs(trip)}>Ekspor kalender .ics</button></div>
+    {trip.activities.length > 0 && <div className="progress-bar"><div className="progress-fill" style={{ width: `${progress}%` }} /><span>{doneActivities}/{trip.activities.length} selesai ({progress}%)</span></div>}
+    {!trip.activities.length ? <p className="panel-empty">Belum ada aktivitas.</p> : <div className="timeline">{trip.activities.map((item) => {
+      const status = getStatus(item);
+      const isExpanded = expandedPhotos[item.id];
+      const photoCount = (item.photos || []).length;
+      return <article key={item.id} className={`timeline-item ${item.done ? "completed" : ""}`}>
+        <div className="timeline-time"><b>{item.time}</b><span>{item.day}</span><span className={`status-badge ${status.cls}`}>{status.label}</span></div>
+        <i className={`timeline-dot ${item.done ? "done" : ""}`} onClick={() => toggleDone(item.id)} title={item.done ? "Tandai belum selesai" : "Tandai selesai"} />
+        <div className="timeline-card card">
+          <h3>{item.title}</h3>
+          <p>{item.note || "Tanpa catatan"}</p>
+          {(item.photos && item.photos.length > 0) && <div className="activity-photos">
+            <img src={item.photos[0].photoData} alt={`Foto ${item.title}`} className="photo-thumb" onClick={() => toggleExpandPhotos(item.id)} />
+            {photoCount > 1 && <span className="photo-count" onClick={() => toggleExpandPhotos(item.id)}>+{photoCount - 1}</span>}
+            {isExpanded && <div className="photo-gallery">
+              {item.photos.map((p) => <img key={p.id} src={p.photoData} alt={`Foto aktivitas`} />)}
+              <button className="quiet" onClick={() => toggleExpandPhotos(item.id)}>Tutup galeri</button>
+            </div>}
+          </div>}
+          <div className="timeline-actions">
+            <button className="mini" onClick={() => setModal({ type: "activity", item })}>Edit</button>
+            <label className="mini photo-upload">📷 Foto<input ref={(el) => { if (el) photoRefs.current[item.id] = el; }} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => uploadPhoto(item.id, e)} /></label>
+            <button className="mini danger" onClick={() => removeItem("activities", item.id, "aktivitas")}>Hapus</button>
+          </div>
+        </div>
+      </article>;
+    })}</div>}
+  </section>;
 }
 
 function Budget({ trip, spent, setModal, removeItem }) {
-  const exportRows = () => downloadCsv(`${trip.destination}-anggaran.csv`, [["Kategori", "Jumlah (IDR)"], ...trip.expenses.map((item) => [item.category, item.amount]), ["Total", spent]]);
-  return <section className="panel"><PanelHead eyebrow="ESTIMASI BIAYA" title={rupiah(spent)} action="＋ Tambah biaya" onAction={() => setModal({ type: "expense", item: null })} /><div className="budget-summary"><span>Rencana <strong>{rupiah(trip.budget)}</strong></span><span>Selisih <strong className={spent > trip.budget ? "negative" : ""}>{rupiah(Number(trip.budget) - spent)}</strong></span><button className="quiet" onClick={exportRows}>Unduh CSV</button></div>{!trip.expenses.length ? <p className="panel-empty">Belum ada biaya.</p> : <div className="data-list">{trip.expenses.map((item) => <article key={item.id}><span>{item.category.slice(0, 1)}</span><strong>{item.category}</strong><b>{rupiah(item.amount)}</b><button className="mini" onClick={() => setModal({ type: "expense", item })}>Edit</button><button className="mini danger" onClick={() => removeItem("expenses", item.id, "biaya")}>Hapus</button></article>)}</div>}</section>;
+  return <section className="panel"><PanelHead eyebrow="ESTIMASI BIAYA" title={rupiah(spent)} action="＋ Tambah biaya" onAction={() => setModal({ type: "expense", item: null })} /><div className="budget-summary"><span>Rencana <strong>{rupiah(trip.budget)}</strong></span><span>Selisih <strong className={spent > trip.budget ? "negative" : ""}>{rupiah(Number(trip.budget) - spent)}</strong></span></div>{!trip.expenses.length ? <p className="panel-empty">Belum ada biaya.</p> : <div className="data-list">{trip.expenses.map((item) => <article key={item.id}><span>{item.category.slice(0, 1)}</span><strong>{item.category}</strong><b>{rupiah(item.amount)}</b><button className="mini" onClick={() => setModal({ type: "expense", item })}>Edit</button><button className="mini danger" onClick={() => removeItem("expenses", item.id, "biaya")}>Hapus</button></article>)}</div>}</section>;
 }
 
-function Checklist({ trip, completed, updateList, setModal, removeItem }) {
+function Checklist({ trip, updateList, setModal, removeItem }) {
   const toggle = (id) => updateList("tasks", trip.tasks.map((task) => task.id === id ? { ...task, done: !task.done } : task));
-  const exportRows = () => downloadCsv(`${trip.destination}-checklist.csv`, [["Tugas", "Status"], ...trip.tasks.map((item) => [item.title, item.done ? "Selesai" : "Belum"])]);
-  return <section className="panel"><PanelHead eyebrow="PERSIAPAN" title={`${completed} dari ${trip.tasks.length} selesai`} action="＋ Tambah tugas" onAction={() => setModal({ type: "task", item: null })} /><div className="export-row"><button className="quiet" onClick={exportRows}>Unduh CSV</button></div>{!trip.tasks.length ? <p className="panel-empty">Belum ada tugas.</p> : <div className="task-list">{trip.tasks.map((task) => <article key={task.id} className={task.done ? "done" : ""}><label><input type="checkbox" checked={task.done} onChange={() => toggle(task.id)} /><span>{task.title}</span></label><button className="mini" onClick={() => setModal({ type: "task", item: task })}>Edit</button><button className="mini danger" onClick={() => removeItem("tasks", task.id, "tugas")}>Hapus</button></article>)}</div>}</section>;
+  const done = trip.tasks.filter((t) => t.done).length;
+  const total = trip.tasks.length;
+  const progress = total ? Math.round(done / total * 100) : 0;
+  const categories = [...new Set(trip.tasks.map((t) => t.category || "Umum"))];
+  return <section className="panel">
+    <PanelHead eyebrow="PERSIAPAN & TUGAS" title={`${done}/${total} tugas selesai`} action="＋ Tambah tugas" onAction={() => setModal({ type: "task", item: null })} />
+    {total > 0 && <div className="progress-bar checklist-progress"><div className="progress-fill" style={{ width: `${progress}%` }} /><span>{progress}% siap — {total - done} tugas tersisa</span></div>}
+    {!total ? <p className="panel-empty">Belum ada tugas. AI akan menghasilkan checklist lengkap.</p> : categories.map((cat) => {
+      const catTasks = trip.tasks.filter((t) => (t.category || "Umum") === cat);
+      const catDone = catTasks.filter((t) => t.done).length;
+      return <div key={cat} className="checklist-group">
+        <h4 className="checklist-category">{cat} <small>{catDone}/{catTasks.length}</small></h4>
+        {catTasks.map((task) => <article key={task.id} className={task.done ? "done" : ""}><label><input type="checkbox" checked={task.done} onChange={() => toggle(task.id)} /><span>{task.title}</span></label><button className="mini" onClick={() => setModal({ type: "task", item: task })}>Edit</button><button className="mini danger" onClick={() => removeItem("tasks", task.id, "tugas")}>Hapus</button></article>)}
+      </div>;
+    })}
+  </section>;
 }
 
 function PanelHead({ eyebrow, title, action, onAction }) { return <header className="panel-head"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></div><button className="primary" onClick={onAction}>{action}</button></header>; }
@@ -385,6 +526,7 @@ function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
   const connect = async () => { try { await signInToCloud(); toast("Mode tamu aktif. Menyiapkan workspace cloud..."); } catch (error) { toast(authMessage(error), "error"); } };
   const disconnect = async () => { try { await signOutFromCloud(); toast("Keluar dari cloud. Data lokal tetap tersedia."); } catch (error) { toast(cloudMessage(error), "error"); } };
   const submitAccount = async (event) => {
@@ -405,13 +547,26 @@ function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, 
       const response = await fetch("/api/ai/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "test", provider, apiKey, brief: { origin: "Jakarta", destination: "Bandung", startDate: "2026-08-01", endDate: "2026-08-02", purpose: "Test", people: 1, budget: 1000000 } }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
-      toast(`Koneksi ${AI_PROVIDERS[provider].label} berhasil. Model ${AI_PROVIDERS[provider].model} siap digunakan.`);
+      await saveProviderKey(provider, apiKey);
+      toast(`Koneksi ${AI_PROVIDERS[provider].label} berhasil. Kunci disimpan terenkripsi di perangkat ini.`);
     } catch (error) { toast(error.message || "Uji koneksi gagal.", "error"); } finally { setTesting(false); }
   };
+  const rememberKey = async () => {
+    if (!apiKey) { toast("Masukkan kunci API terlebih dahulu.", "error"); return; }
+    setSavingKey(true);
+    try { await saveProviderKey(provider, apiKey); toast("Kunci API disimpan terenkripsi di perangkat ini."); }
+    catch { toast("Browser tidak dapat menyimpan kunci terenkripsi.", "error"); }
+    finally { setSavingKey(false); }
+  };
+  const clearKey = async () => {
+    await deleteProviderKey(provider);
+    setApiKey("");
+    toast("Kunci dihapus dari memori dan penyimpanan terenkripsi.");
+  };
   return <section className="settings-stack">
-    <article className="settings card"><div className="settings-title"><span className="settings-number">01</span><div><p className="eyebrow">KECERDASAN BUATAN</p><h2>{AI_PROVIDERS[provider].label}</h2><p>Kunci dikirim hanya ke endpoint server Serenity lalu diteruskan ke provider terpilih. Kunci tidak disimpan di localStorage, sessionStorage, cookie, Firestore, atau source code.</p></div></div><div className="settings-form"><label>Provider<select value={provider} onChange={(event) => { setProvider(event.target.value); setApiKey(""); }}><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label><label>Model<input value={AI_PROVIDERS[provider].model} readOnly /></label><label className="key-field">Kunci API (memory-only)<span><input type={showKey ? "text" : "password"} value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" placeholder={provider === "gemini" ? "AIza..." : "sk-..."} /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? "Sembunyikan" : "Lihat"}</button></span><small>Kunci hanya bertahan selama sesi halaman ini. Refresh atau menutup tab akan menghapusnya.</small></label><div className="button-row"><button className="primary" onClick={test} disabled={testing}>{testing ? "Menguji..." : "Uji koneksi"}</button><button className="quiet" onClick={() => { setApiKey(""); toast("Kunci dihapus dari memori halaman."); }} disabled={!apiKey}>Hapus kunci</button></div></div></article>
+    <article className="settings card"><div className="settings-title"><span className="settings-number">01</span><div><p className="eyebrow">KECERDASAN BUATAN</p><h2>{AI_PROVIDERS[provider].label}</h2><p>Kunci dikirim hanya ke endpoint server Serenity lalu diteruskan ke provider terpilih. Kunci disimpan terenkripsi dengan Web Crypto pada perangkat ini dan tidak dikirim ke Firestore.</p></div></div><div className="settings-form"><label>Provider<select value={provider} onChange={(event) => { setProvider(event.target.value); setApiKey(""); }}><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label><label>Model<input value={AI_PROVIDERS[provider].model} readOnly /></label><label className="key-field">Kunci API<span><input type={showKey ? "text" : "password"} value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" placeholder={provider === "gemini" ? "AIza..." : "sk-..."} /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? "Sembunyikan" : "Lihat"}</button></span><small>Setelah disimpan atau koneksi berhasil, kunci tetap tersedia setelah refresh pada browser ini.</small></label><div className="button-row"><button className="primary" onClick={test} disabled={testing}>{testing ? "Menguji..." : "Uji koneksi"}</button><button className="outline" onClick={rememberKey} disabled={!apiKey || savingKey}>{savingKey ? "Menyimpan..." : "Simpan terenkripsi"}</button><button className="quiet" onClick={clearKey} disabled={!apiKey}>Hapus kunci</button></div></div></article>
     <article className="settings card"><div className="settings-title"><span className="settings-number">02</span><div><p className="eyebrow">CLOUD SYNC</p><h2>Workspace pribadi</h2><p>Akun email menjaga akses itinerary tetap tersedia di perangkat lain. Mode tamu tersedia untuk mencoba tanpa registrasi.</p></div></div>{user ? <div className="sync-setting"><div><span className={`state-dot ${cloudState}`} /><strong>{syncLabel(cloudState)}</strong><small>{user.isAnonymous ? `Mode tamu · ${user.uid.slice(0, 8)}…` : user.email}</small></div><button className="quiet" onClick={disconnect}>Keluar dari cloud</button></div> : <><div className="auth-switch"><button className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Masuk</button><button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Buat akun</button></div><form className="settings-form auth-form" onSubmit={submitAccount}><Field label="Email" type="email" autoComplete="email" value={email} onChange={setEmail} required /><Field label="Password" type="password" minLength="6" autoComplete={authMode === "register" ? "new-password" : "current-password"} value={password} onChange={setPassword} required /><div className="button-row"><button className="primary" disabled={authBusy}>{authBusy ? "Memproses..." : authMode === "register" ? "Buat akun & sinkronkan" : "Masuk & sinkronkan"}</button><button type="button" className="quiet" onClick={connect}>Coba sebagai tamu</button></div></form></>}{user && !cloudReady && <p className="form-error">Workspace belum siap. Tidak ada trip yang ditulis sebelum bootstrap selesai.</p>}</article>
-    <article className="privacy card"><span>i</span><div><h3>Data & privasi</h3><p>Trip tetap memiliki salinan localStorage untuk akses offline. Data terstruktur dan foto WebP maksimal 300 KB tersimpan di Firestore saat cloud aktif. Kunci AI hanya berada di memori halaman. Output AI dapat keliru; verifikasi harga, jadwal, visa, kesehatan, dan keselamatan.</p></div></article>
+    <article className="privacy card"><span>i</span><div><h3>Data & privasi</h3><p>Trip memiliki salinan lokal untuk akses offline dan otomatis tersinkron ke Firestore melalui akun tamu atau email. Foto WebP maksimal 300 KB ikut tersinkron. Kunci AI terenkripsi hanya pada perangkat ini dan tidak masuk Firestore. Output AI tetap perlu diverifikasi.</p></div></article>
   </section>;
 }
 
