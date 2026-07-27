@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(cd /d F:\\project\\itenary-serenity && dir /s /b src\\*.ts src\\*.tsx src\\*.js src\\*.jsx src\\*.mjs src\\*.css 2>nul | head -100)",
+      "Shell(npm:*)",
+      "powershell",
+      "Shell(git:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

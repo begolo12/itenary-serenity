@@ -169,7 +169,7 @@ export default function Home() {
         {hydrated && view === "detail" && !selected && <Empty title="Itinerary tidak ditemukan" text="Pilih itinerary dari beranda atau buat rencana baru." action={() => nav("home")} actionText="Ke beranda" />}
         {hydrated && view === "settings" && <Settings apiKey={apiKey} setApiKey={setApiKey} provider={aiProvider} setProvider={setAiProvider} user={user} cloudState={cloudState} cloudReady={cloudReady} toast={toast} />}
       </section>
-      <BottomNav nav={nav} openTrip={openTrip} selectedId={selectedId} trips={trips} />
+      <BottomNav view={view} nav={nav} openTrip={openTrip} selectedId={selectedId} trips={trips} />
     </main>
   );
 }
@@ -557,12 +557,131 @@ function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, 
     finally { setSavingKey(false); }
   };
   let i = 0;
-  return <section className="settings-stack">
-    {admin && <article className="settings card"><div className="settings-title"><span className="settings-number">{step[i++]}</span><div><p className="eyebrow">KECERDASAN BUATAN</p><h2>{AI_PROVIDERS[provider].label}</h2><p>Anda super admin. Kunci disimpan global untuk semua pengguna.</p></div></div><div className="settings-form"><label>Provider<select value={provider} onChange={(event) => { setProvider(event.target.value); setApiKey(""); }}><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label><label>Model<input value={AI_PROVIDERS[provider].model} readOnly /></label><label className="key-field">Kunci API<span><input type={showKey ? "text" : "password"} value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" placeholder={provider === "gemini" ? "AIza..." : "sk-..."} /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? "Sembunyikan" : "Lihat"}</button></span><small>Simpan kunci agar dapat dipakai semua akun.</small></label><div className="button-row"><button className="primary" onClick={test} disabled={testing}>{testing ? "Menguji..." : "Uji koneksi"}</button><button className="outline" onClick={saveKey} disabled={!apiKey || savingKey}>{savingKey ? "Menyimpan..." : "Simpan global"}</button></div></div></article>}
-    <article className="settings card"><div className="settings-title"><span className="settings-number">{step[i++]}</span><div><p className="eyebrow">PREFERENSI</p><h2>Wilayah & tampilan</h2></div></div><div className="settings-form"><label>Mata uang<select value={currency} onChange={(e) => changeCurrency(e.target.value)}>{CURRENCY_LIST.map((c) => <option key={c} value={c}>{c}</option>)}</select></label><label>Bahasa<select value={language} disabled><option value="id">Indonesia</option><option value="en">English</option></select></label></div></article>
-    <article className="settings card"><div className="settings-title"><span className="settings-number">{step[i++]}</span><div><p className="eyebrow">CLOUD SYNC</p><h2>Workspace pribadi</h2><p>Akun email menjaga akses itinerary tetap tersedia di perangkat lain.</p></div></div>{user ? <div className="sync-setting"><div><span className={`state-dot ${cloudState}`} /><strong>{syncLabel(cloudState)}</strong><small>{user.isAnonymous ? `Mode tamu · ${user.uid.slice(0, 8)}…` : user.email}</small></div><button className="quiet" onClick={disconnect}>Keluar dari cloud</button></div> : <><button className="google-btn settings-google" onClick={async () => { try { await signInWithGoogle(); toast("Berhasil masuk dengan Google. Menyinkronkan workspace..."); } catch (error) { toast(authMessage(error), "error"); } }}><svg viewBox="0 0 48 48" width="18" height="18"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="m6.306 14.691 6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>Lanjutkan dengan Google</button><div className="divider"><span>atau</span></div><div className="auth-switch"><button className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Masuk</button><button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Daftar</button></div>{authMode === "register" ? <form className="auth-form" onSubmit={submitAccount}><div className="settings-form"><label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@contoh.com" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Minimal 6 karakter" minLength={6} required /></label><div className="button-row"><button className="primary" disabled={authBusy}>{authBusy ? "Memproses..." : "Daftar"}</button></div></div></form> : <form className="auth-form" onSubmit={submitAccount}><div className="settings-form"><label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@contoh.com" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Masukkan password" required /></label><div className="button-row"><button className="primary" disabled={authBusy}>{authBusy ? "Memproses..." : "Masuk"}</button></div></div></form>}</div></article>
-    <article className="privacy card"><span>i</span><div><h3>Data & privasi</h3><p>Trip memiliki salinan lokal untuk akses offline dan otomatis tersinkron ke Firestore melalui akun tamu atau email. Foto WebP maksimal 300 KB ikut tersinkron. Kunci AI dikelola super admin. Output AI tetap perlu diverifikasi.</p></div></article>
-  </section>;
+  return (
+    <section className="settings-stack">
+      {admin && (
+        <article className="settings card">
+          <div className="settings-title">
+            <span className="settings-number">{step[i++]}</span>
+            <div>
+              <p className="eyebrow">KECERDASAN BUATAN</p>
+              <h2>{AI_PROVIDERS[provider].label}</h2>
+              <p>Anda super admin. Kunci disimpan global untuk semua pengguna.</p>
+            </div>
+          </div>
+          <div className="settings-form">
+            <label>Provider
+              <select value={provider} onChange={(event) => { setProvider(event.target.value); setApiKey(""); }}>
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai">OpenAI</option>
+                <option value="gemini">Gemini</option>
+              </select>
+            </label>
+            <label>Model<input value={AI_PROVIDERS[provider].model} readOnly /></label>
+            <label className="key-field">Kunci API
+              <span>
+                <input type={showKey ? "text" : "password"} value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" placeholder={provider === "gemini" ? "AIza..." : "sk-..."} />
+                <button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? "Sembunyikan" : "Lihat"}</button>
+              </span>
+              <small>Simpan kunci agar dapat dipakai semua akun.</small>
+            </label>
+            <div className="button-row">
+              <button className="primary" onClick={test} disabled={testing}>{testing ? "Menguji..." : "Uji koneksi"}</button>
+              <button className="outline" onClick={saveKey} disabled={!apiKey || savingKey}>{savingKey ? "Menyimpan..." : "Simpan global"}</button>
+            </div>
+          </div>
+        </article>
+      )}
+      <article className="settings card">
+        <div className="settings-title">
+          <span className="settings-number">{step[i++]}</span>
+          <div>
+            <p className="eyebrow">PREFERENSI</p>
+            <h2>Wilayah & tampilan</h2>
+          </div>
+        </div>
+        <div className="settings-form">
+          <label>Mata uang
+            <select value={currency} onChange={(e) => changeCurrency(e.target.value)}>
+              {CURRENCY_LIST.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label>Bahasa
+            <select value={language} disabled>
+              <option value="id">Indonesia</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+        </div>
+      </article>
+      <article className="settings card">
+        <div className="settings-title">
+          <span className="settings-number">{step[i++]}</span>
+          <div>
+            <p className="eyebrow">CLOUD SYNC</p>
+            <h2>Workspace pribadi</h2>
+            <p>Akun email menjaga akses itinerary tetap tersedia di perangkat lain.</p>
+          </div>
+        </div>
+        {user ? (
+          <div className="sync-setting">
+            <div>
+              <span className={`state-dot ${cloudState}`} />
+              <strong>{syncLabel(cloudState)}</strong>
+              <small>{user.isAnonymous ? `Mode tamu · ${user.uid.slice(0, 8)}\u2026` : user.email}</small>
+            </div>
+            <button className="quiet" onClick={disconnect}>Keluar dari cloud</button>
+          </div>
+        ) : (
+          <>
+            <button className="google-btn settings-google" onClick={async () => { try { await signInWithGoogle(); toast("Berhasil masuk dengan Google. Menyinkronkan workspace..."); } catch (error) { toast(authMessage(error), "error"); } }}>
+              <svg viewBox="0 0 48 48" width="18" height="18">
+                <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
+                <path fill="#FF3D00" d="m6.306 14.691 6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/>
+                <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/>
+                <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/>
+              </svg>
+              Lanjutkan dengan Google
+            </button>
+            <div className="divider"><span>atau</span></div>
+            <div className="auth-switch">
+              <button className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Masuk</button>
+              <button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Daftar</button>
+            </div>
+            {authMode === "register" ? (
+              <form className="auth-form" onSubmit={submitAccount}>
+                <div className="settings-form">
+                  <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@contoh.com" required /></label>
+                  <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Minimal 6 karakter" minLength={6} required /></label>
+                  <div className="button-row">
+                    <button className="primary" disabled={authBusy}>{authBusy ? "Memproses..." : "Daftar"}</button>
+                  </div>
+                </div>
+              </form>
+            ) : (
+              <form className="auth-form" onSubmit={submitAccount}>
+                <div className="settings-form">
+                  <label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@contoh.com" required /></label>
+                  <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Masukkan password" required /></label>
+                  <div className="button-row">
+                    <button className="primary" disabled={authBusy}>{authBusy ? "Memproses..." : "Masuk"}</button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </>
+        )}
+      </article>
+      <article className="privacy card">
+        <span>i</span>
+        <div>
+          <h3>Data & privasi</h3>
+          <p>Trip memiliki salinan lokal untuk akses offline dan otomatis tersinkron ke Firestore melalui akun tamu atau email. Foto WebP maksimal 300 KB ikut tersinkron. Kunci AI dikelola super admin. Output AI tetap perlu diverifikasi.</p>
+        </div>
+      </article>
+    </section>
+  );
+}
 
 function authMessage(error) {
   const messages = {
@@ -578,4 +697,28 @@ function authMessage(error) {
   return messages[error?.code] || cloudMessage(error);
 }
 
-function BottomNav({ nav, openTrip, selectedId, trips }) { return <nav className="bottom-nav" aria-label="Navigasi mobile"><button onClick={() => nav("home")}><Icon>⌂</Icon>Beranda</button><button onClick={() => trips[0] ? openTrip(selectedId || trips[0].id) : nav("new")}><Icon>≡</Icon>Rencana</button><button className="fab" onClick={() => nav("new")} aria-label="Buat itinerary">＋</button><button onClick={() => nav("settings")}><Icon>⚙</Icon>Pengaturan</button></nav>; }
+function BottomNav({ nav, openTrip, selectedId, trips, view }) {
+  return (
+    <nav className="bottom-nav" aria-label="Navigasi mobile">
+      <button className={view === "home" ? "active" : ""} onClick={() => nav("home")}>
+        <Icon>⌂</Icon>
+        <span>Beranda</span>
+      </button>
+      <button className={view === "detail" ? "active" : ""} onClick={() => trips[0] ? openTrip(selectedId || trips[0].id) : nav("new")}>
+        <Icon>≡</Icon>
+        <span>Rencana</span>
+      </button>
+      <button className={`fab ${view === "new" ? "active" : ""}`} onClick={() => nav("new")} aria-label="Buat itinerary">
+        <span>＋</span>
+      </button>
+      <button className={view === "calendar" ? "active" : ""} onClick={() => nav("calendar")}>
+        <Icon>📅</Icon>
+        <span>Kalender</span>
+      </button>
+      <button className={view === "settings" ? "active" : ""} onClick={() => nav("settings")}>
+        <Icon>👤</Icon>
+        <span>Akun</span>
+      </button>
+    </nav>
+  );
+}

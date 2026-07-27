@@ -1,0 +1,13 @@
+# User Taste Profile
+- **Language**: Prefers communicating in Bahasa Indonesia (Indonesian). Requests and instructions are in Indonesian; expects responses in Indonesian as well. Confidence: 0.95
+- **Response Language**: Appreciates Indonesian-language summaries and explanations, even when technical documentation is in English. Confidence: 0.9
+- **Explicit Documentation Requests**: Wants deliverables documented in files for tracking purposes ("buatkan docnya supaya ter tracking"). Prefers tangible, persistent output files over verbal-only summaries. Confidence: 0.95
+- **Comprehensive Documentation Style**: Values thorough, well-structured documentation with clear sections, tables, status indicators, and severity classifications. Confidence: 0.85
+- **Thoroughness Over Speed**: Prefers comprehensive, full-scope analysis ("audit keseluruhan") rather than partial or surface-level reviews. Confidence: 0.9
+- **Actionable Output**: Values deliverables that include prioritized recommendations, roadmaps, and next steps — not just findings. Confidence: 0.8
+- **Active Project**: Working on "itenary-serenity" — a Next.js AI-powered itinerary planner using Firebase and multiple AI providers. Confidence: 1.0
+- **Development Environment**: Windows OS, using file paths like `F:\project\itenary-serenity\`. Confidence: 0.9
+- **Visual Issue Reporting**: Shares screenshots to communicate UI/visual bugs rather than describing them textually. Prefers showing over telling for layout/design issues. Confidence: 0.8
+- **Mobile-First Quality**: Prioritizes mobile responsiveness and considers poor mobile display a significant quality issue ("tampilan handphone masih jelek"). Will reject UI work that doesn't look good on phones. Confidence: 0.9
+- **Task Bundling**: Combines related follow-up tasks into a single request (e.g., "continue audit AND fix mobile display") for efficiency. Confidence: 0.85
+- **"Lanjutkan Semuanya" Workflow**: Expects the agent to continue working through all tasks autonomously without pausing for confirmation at each step. Saying "tolong lanjutkan semuanya" means "do everything to completion, don't stop and ask." Confidence: 0.85
