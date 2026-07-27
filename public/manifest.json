@@ -1,0 +1,15 @@
+{
+  "name": "Serenity Itinerary",
+  "short_name": "Serenity",
+  "description": "Rencana perjalanan yang rapi, tenang, dan selalu dapat diedit.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3efe7",
+  "theme_color": "#176a59",
+  "orientation": "portrait-primary",
+  "categories": ["travel", "productivity"],
+  "icons": [
+    { "src": "/icon-192.svg", "type": "image/svg+xml", "sizes": "192x192" },
+    { "src": "/icon-512.svg", "type": "image/svg+xml", "sizes": "512x512" }
+  ]
+}

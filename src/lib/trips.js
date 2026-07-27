@@ -53,9 +53,17 @@ export function createTemplate(form) {
   };
 }
 
-export const rupiah = (value) => new Intl.NumberFormat("id-ID", {
-  style: "currency", currency: "IDR", maximumFractionDigits: 0,
-}).format(Number(value || 0));
+export const CURRENCY_KEY = "serenity-currency";
+const CURRENCIES = { IDR: "id-ID", USD: "en-US", SGD: "en-SG", MYR: "ms-MY" };
+export const CURRENCY_LIST = Object.keys(CURRENCIES);
+
+export const rupiah = (value, currency) => {
+  const cur = currency || (typeof localStorage !== "undefined" && localStorage.getItem(CURRENCY_KEY)) || "IDR";
+  const locale = CURRENCIES[cur] || "id-ID";
+  return new Intl.NumberFormat(locale, {
+    style: "currency", currency: cur, maximumFractionDigits: 0,
+  }).format(Number(value || 0));
+};
 
 export const dateLabel = (value) => value
   ? new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`))

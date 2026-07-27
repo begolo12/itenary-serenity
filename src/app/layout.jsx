@@ -16,12 +16,27 @@ const newsreader = Newsreader({
 export const metadata = {
   title: "Serenity Itinerary",
   description: "Rencana perjalanan yang rapi, tenang, dan selalu dapat diedit.",
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="id" className={`${manrope.variable} ${newsreader.variable}`}>
-      <body>{children}</body>
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#176a59" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Serenity" />
+        <link rel="apple-touch-icon" href="/icon-192.svg" />
+      </head>
+      <body>
+        {children}
+        <script dangerouslySetInnerHTML={{
+          __html: `if("serviceWorker"in navigator){window.addEventListener("load",()=>{navigator.serviceWorker.register("/sw.js").catch(()=>{})})}`,
+        }} />
+      </body>
     </html>
   );
 }

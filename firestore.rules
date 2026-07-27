@@ -125,7 +125,12 @@ service cloud.firestore {
       }
     }
 
-    match /{document=**} {
+  match /_appSettings/{document} {
+    allow read: if signedIn();
+    allow write: if signedIn() && request.auth.token.email == 'begolo111@gmail.com';
+  }
+
+  match /{document=**} {
       allow read, write: if false;
     }
   }

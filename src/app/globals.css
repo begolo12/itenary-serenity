@@ -249,7 +249,8 @@ textarea { min-height: 100px; resize: vertical; }
   .cloud-state span { display: none; }
   .hero { min-height: 365px; padding: 35px 25px; }
   .hero h2 { font-size: 43px; }
-  .atlas-art { right: 25px; bottom: 40px; width: 62%; opacity: 1; }
+  .hero > div:first-child { max-width: 55%; }
+  .atlas-art { right: 15px; bottom: 25px; width: auto; opacity: 1; }
   .hero::after { width: 80%; }
   .metrics { display: flex; overflow-x: auto; }
   .metrics article { min-width: 170px; border-right: 1px solid var(--line); }
@@ -303,6 +304,11 @@ textarea { min-height: 100px; resize: vertical; }
 @media (max-width: 420px) {
   body { font-size: 13px; }
   .content { padding: 18px 12px 81px; }
+  .hero { min-height: 310px; padding: 25px 16px; }
+  .hero h2 { font-size: 32px; }
+  .hero > div:first-child { max-width: 100%; }
+  .atlas-art { position: relative; right: auto; bottom: auto; margin-top: -50px; justify-content: flex-end; }
+  .hero::after { width: 100%; }
   .topbar h1 { font-size: 26px; }
   .panel-head h2 { font-size: 22px; }
   .wizard h2 { font-size: 28px; }

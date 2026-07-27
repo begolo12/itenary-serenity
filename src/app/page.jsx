@@ -2,15 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { compressPhotoForFirestore } from "../lib/image-compression";
-import { deleteProviderKey, loadProviderKey, saveProviderKey } from "../lib/secure-key-store";
 import {
   bootstrapWorkspace, createCloudAccount, deleteCloudTrip, saveCloudTrip,
   signInToCloud, signInWithCloudAccount, signInWithGoogle, signOutFromCloud, watchAuth, watchCloudTrips,
-  saveProviderKeyToCloud, loadProviderKeyFromCloud,
+  saveSharedApiKey, loadSharedApiKey, sharedApiKeyExists, isSuperAdmin,
 } from "../lib/cloud-sync";
 import {
   STORAGE_KEY, blankTrip, createTemplate, dateLabel, downloadCsv, downloadIcs,
-  rupiah, validateTrip,
+  rupiah, validateTrip, CURRENCY_KEY, CURRENCY_LIST,
 } from "../lib/trips";
 
 const tabs = [
@@ -91,7 +90,7 @@ export default function Home() {
       await bootstrapWorkspace(currentUser);
       setCloudReady(true);
       setCloudState(navigator.onLine ? "synced" : "offline");
-      loadProviderKeyFromCloud(currentUser.uid, aiProvider).then((cloudKey) => { if (cloudKey) setApiKey(cloudKey); });
+      loadSharedApiKey(aiProvider).then((sharedKey) => { if (sharedKey) setApiKey(sharedKey); });
       cloudUnsubscribe.current = watchCloudTrips(currentUser.uid, (cloudTrips) => {
         setTrips((localTrips) => {
           const merged = [...localTrips];
@@ -138,15 +137,6 @@ export default function Home() {
     window.addEventListener("offline", offline);
     return () => { window.removeEventListener("online", online); window.removeEventListener("offline", offline); };
   }, [user]);
-
-  useEffect(() => {
-    let active = true;
-    setApiKey("");
-    loadProviderKey(aiProvider)
-      .then((savedKey) => { if (active) setApiKey(savedKey); })
-      .catch(() => { if (active) toast("Kunci tersimpan tidak dapat dibuka pada perangkat ini.", "error"); });
-    return () => { active = false; };
-  }, [aiProvider]);
 
   const selected = trips.find((trip) => trip.id === selectedId);
   const nav = (target) => setView(target);
@@ -529,6 +519,12 @@ function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, 
   const [password, setPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
+  const [currency, setCurrency] = useState("IDR");
+  const [language] = useState("id");
+  const admin = isSuperAdmin(user);
+  const step = admin ? ["01", "02", "03"] : ["01", "02"];
+  useEffect(() => { try { const saved = localStorage.getItem(CURRENCY_KEY); if (saved) setCurrency(saved); } catch {} }, []);
+  const changeCurrency = (value) => { setCurrency(value); try { localStorage.setItem(CURRENCY_KEY, value); } catch {} };
   const connect = async () => { try { await signInToCloud(); toast("Mode tamu aktif. Menyiapkan workspace cloud..."); } catch (error) { toast(authMessage(error), "error"); } };
   const disconnect = async () => { try { await signOutFromCloud(); toast("Keluar dari cloud. Data lokal tetap tersedia."); } catch (error) { toast(cloudMessage(error), "error"); } };
   const submitAccount = async (event) => {
@@ -549,29 +545,24 @@ function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, 
       const response = await fetch("/api/ai/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "test", provider, apiKey, brief: { origin: "Jakarta", destination: "Bandung", startDate: "2026-08-01", endDate: "2026-08-02", purpose: "Test", people: 1, budget: 1000000 } }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
-      await saveProviderKey(provider, apiKey);
-      if (user) await saveProviderKeyToCloud(user.uid, provider, apiKey);
-      toast(`Koneksi ${AI_PROVIDERS[provider].label} berhasil. Kunci disimpan terenkripsi di perangkat ini.`);
+      if (admin) await saveSharedApiKey(provider, apiKey);
+      toast(`Koneksi ${AI_PROVIDERS[provider].label} berhasil. Kunci ${admin ? "disimpan global" : "terverifikasi"}.`);
     } catch (error) { toast(error.message || "Uji koneksi gagal.", "error"); } finally { setTesting(false); }
   };
-  const rememberKey = async () => {
+  const saveKey = async () => {
     if (!apiKey) { toast("Masukkan kunci API terlebih dahulu.", "error"); return; }
     setSavingKey(true);
-    try { await saveProviderKey(provider, apiKey); if (user) await saveProviderKeyToCloud(user.uid, provider, apiKey); toast("Kunci API disimpan terenkripsi di perangkat ini."); }
-    catch { toast("Browser tidak dapat menyimpan kunci terenkripsi.", "error"); }
+    try { await saveSharedApiKey(provider, apiKey); toast("Kunci API global berhasil disimpan."); }
+    catch { toast("Gagal menyimpan kunci. Pastikan Anda super admin.", "error"); }
     finally { setSavingKey(false); }
   };
-  const clearKey = async () => {
-    await deleteProviderKey(provider);
-    setApiKey("");
-    toast("Kunci dihapus dari memori dan penyimpanan terenkripsi.");
-  };
+  let i = 0;
   return <section className="settings-stack">
-    <article className="settings card"><div className="settings-title"><span className="settings-number">01</span><div><p className="eyebrow">KECERDASAN BUATAN</p><h2>{AI_PROVIDERS[provider].label}</h2><p>Kunci dikirim hanya ke endpoint server Serenity lalu diteruskan ke provider terpilih. Kunci disimpan terenkripsi dengan Web Crypto pada perangkat ini dan tidak dikirim ke Firestore.</p></div></div><div className="settings-form"><label>Provider<select value={provider} onChange={(event) => { setProvider(event.target.value); setApiKey(""); }}><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label><label>Model<input value={AI_PROVIDERS[provider].model} readOnly /></label><label className="key-field">Kunci API<span><input type={showKey ? "text" : "password"} value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" placeholder={provider === "gemini" ? "AIza..." : "sk-..."} /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? "Sembunyikan" : "Lihat"}</button></span><small>Setelah disimpan atau koneksi berhasil, kunci tetap tersedia setelah refresh pada browser ini.</small></label><div className="button-row"><button className="primary" onClick={test} disabled={testing}>{testing ? "Menguji..." : "Uji koneksi"}</button><button className="outline" onClick={rememberKey} disabled={!apiKey || savingKey}>{savingKey ? "Menyimpan..." : "Simpan terenkripsi"}</button><button className="quiet" onClick={clearKey} disabled={!apiKey}>Hapus kunci</button></div></div></article>
-    <article className="settings card"><div className="settings-title"><span className="settings-number">02</span><div><p className="eyebrow">CLOUD SYNC</p><h2>Workspace pribadi</h2><p>Akun email menjaga akses itinerary tetap tersedia di perangkat lain. Mode tamu tersedia untuk mencoba tanpa registrasi.</p></div></div>{user ? <div className="sync-setting"><div><span className={`state-dot ${cloudState}`} /><strong>{syncLabel(cloudState)}</strong><small>{user.isAnonymous ? `Mode tamu · ${user.uid.slice(0, 8)}…` : user.email}</small></div><button className="quiet" onClick={disconnect}>Keluar dari cloud</button></div> : <><button className="google-btn settings-google" onClick={async () => { try { await signInWithGoogle(); toast("Berhasil masuk dengan Google. Menyinkronkan workspace..."); } catch (error) { toast(authMessage(error), "error"); } }}><svg viewBox="0 0 48 48" width="18" height="18"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="m6.306 14.691 6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>Lanjutkan dengan Google</button><div className="divider"><span>atau</span></div><div className="auth-switch"><button className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Masuk</button><button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Buat akun</button></div><form className="settings-form auth-form" onSubmit={submitAccount}><Field label="Email" type="email" autoComplete="email" value={email} onChange={setEmail} required /><Field label="Password" type="password" minLength="6" autoComplete={authMode === "register" ? "new-password" : "current-password"} value={password} onChange={setPassword} required /><div className="button-row"><button className="primary" disabled={authBusy}>{authBusy ? "Memproses..." : authMode === "register" ? "Buat akun & sinkronkan" : "Masuk & sinkronkan"}</button><button type="button" className="quiet" onClick={connect}>Coba sebagai tamu</button></div></form></>}{user && !cloudReady && <p className="form-error">Workspace belum siap. Tidak ada trip yang ditulis sebelum bootstrap selesai.</p>}</article>
-    <article className="privacy card"><span>i</span><div><h3>Data & privasi</h3><p>Trip memiliki salinan lokal untuk akses offline dan otomatis tersinkron ke Firestore melalui akun tamu atau email. Foto WebP maksimal 300 KB ikut tersinkron. Kunci AI terenkripsi hanya pada perangkat ini dan tidak masuk Firestore. Output AI tetap perlu diverifikasi.</p></div></article>
+    {admin && <article className="settings card"><div className="settings-title"><span className="settings-number">{step[i++]}</span><div><p className="eyebrow">KECERDASAN BUATAN</p><h2>{AI_PROVIDERS[provider].label}</h2><p>Anda super admin. Kunci disimpan global untuk semua pengguna.</p></div></div><div className="settings-form"><label>Provider<select value={provider} onChange={(event) => { setProvider(event.target.value); setApiKey(""); }}><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label><label>Model<input value={AI_PROVIDERS[provider].model} readOnly /></label><label className="key-field">Kunci API<span><input type={showKey ? "text" : "password"} value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" placeholder={provider === "gemini" ? "AIza..." : "sk-..."} /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? "Sembunyikan" : "Lihat"}</button></span><small>Simpan kunci agar dapat dipakai semua akun.</small></label><div className="button-row"><button className="primary" onClick={test} disabled={testing}>{testing ? "Menguji..." : "Uji koneksi"}</button><button className="outline" onClick={saveKey} disabled={!apiKey || savingKey}>{savingKey ? "Menyimpan..." : "Simpan global"}</button></div></div></article>}
+    <article className="settings card"><div className="settings-title"><span className="settings-number">{step[i++]}</span><div><p className="eyebrow">PREFERENSI</p><h2>Wilayah & tampilan</h2></div></div><div className="settings-form"><label>Mata uang<select value={currency} onChange={(e) => changeCurrency(e.target.value)}>{CURRENCY_LIST.map((c) => <option key={c} value={c}>{c}</option>)}</select></label><label>Bahasa<select value={language} disabled><option value="id">Indonesia</option><option value="en">English</option></select></label></div></article>
+    <article className="settings card"><div className="settings-title"><span className="settings-number">{step[i++]}</span><div><p className="eyebrow">CLOUD SYNC</p><h2>Workspace pribadi</h2><p>Akun email menjaga akses itinerary tetap tersedia di perangkat lain.</p></div></div>{user ? <div className="sync-setting"><div><span className={`state-dot ${cloudState}`} /><strong>{syncLabel(cloudState)}</strong><small>{user.isAnonymous ? `Mode tamu · ${user.uid.slice(0, 8)}…` : user.email}</small></div><button className="quiet" onClick={disconnect}>Keluar dari cloud</button></div> : <><button className="google-btn settings-google" onClick={async () => { try { await signInWithGoogle(); toast("Berhasil masuk dengan Google. Menyinkronkan workspace..."); } catch (error) { toast(authMessage(error), "error"); } }}><svg viewBox="0 0 48 48" width="18" height="18"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="m6.306 14.691 6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>Lanjutkan dengan Google</button><div className="divider"><span>atau</span></div><div className="auth-switch"><button className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Masuk</button><button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Daftar</button></div>{authMode === "register" ? <form className="auth-form" onSubmit={submitAccount}><div className="settings-form"><label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@contoh.com" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Minimal 6 karakter" minLength={6} required /></label><div className="button-row"><button className="primary" disabled={authBusy}>{authBusy ? "Memproses..." : "Daftar"}</button></div></div></form> : <form className="auth-form" onSubmit={submitAccount}><div className="settings-form"><label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@contoh.com" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Masukkan password" required /></label><div className="button-row"><button className="primary" disabled={authBusy}>{authBusy ? "Memproses..." : "Masuk"}</button></div></div></form>}</div></article>
+    <article className="privacy card"><span>i</span><div><h3>Data & privasi</h3><p>Trip memiliki salinan lokal untuk akses offline dan otomatis tersinkron ke Firestore melalui akun tamu atau email. Foto WebP maksimal 300 KB ikut tersinkron. Kunci AI dikelola super admin. Output AI tetap perlu diverifikasi.</p></div></article>
   </section>;
-}
 
 function authMessage(error) {
   const messages = {

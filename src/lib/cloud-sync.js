@@ -139,17 +139,30 @@ export function watchCloudTrips(uid, onTrips, onError) {
   }, onError);
 }
 
-export async function saveProviderKeyToCloud(uid, provider, apiKey) {
+export async function saveSharedApiKey(provider, apiKey) {
   requireCloud();
-  const ref = doc(db, "workspaces", uid, "secrets", "provider-keys");
+  const ref = doc(db, "_appSettings", "provider-keys");
   await withRetry(() => setDoc(ref, { [`provider:${provider}`]: apiKey, updatedAt: new Date().toISOString() }, { merge: true }));
 }
 
-export async function loadProviderKeyFromCloud(uid, provider) {
+export async function loadSharedApiKey(provider) {
   requireCloud();
-  const ref = doc(db, "workspaces", uid, "secrets", "provider-keys");
+  const ref = doc(db, "_appSettings", "provider-keys");
   const snapshot = await withRetry(() => getDoc(ref));
   if (!snapshot.exists()) return "";
   return snapshot.data()[`provider:${provider}`] || "";
+}
+
+export async function sharedApiKeyExists() {
+  requireCloud();
+  const ref = doc(db, "_appSettings", "provider-keys");
+  const snapshot = await withRetry(() => getDoc(ref));
+  return snapshot.exists();
+}
+
+export const SUPER_ADMIN_EMAIL = "begolo111@gmail.com";
+
+export function isSuperAdmin(user) {
+  return user?.email === SUPER_ADMIN_EMAIL;
 }
 
