@@ -43,6 +43,9 @@ h1, h2, h3 { font-family: var(--font-newsreader), Iowan Old Style, Baskerville, 
 .sync-card i.saving, .cloud-state.saving i, .sync-card i.connecting { animation: pulse 1s infinite; }
 .sync-card strong, .sync-card small { display: block; font-size: 11px; }
 .sync-card small { margin-top: 2px; color: #aac2ba; }
+.sync-card .sync-login { margin-left: auto; padding: 4px 10px; border: 1px solid #5b8a7d; border-radius: 5px; background: transparent; color: #d8eae4; font-size: 11px; font-weight: 700; cursor: pointer; }
+.sync-card .sync-login:hover { background: #35695f; }
+
 
 .content { min-height: 100vh; margin-left: 252px; padding: 39px clamp(26px, 5vw, 78px) 70px; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; max-width: 1260px; margin: 0 auto 31px; }
@@ -370,3 +373,158 @@ input[inputmode="numeric"] { font-variant-numeric: tabular-nums; }
 .timeline-card p { white-space: pre-line; line-height: 1.6; }
 .bar.coral i { background: linear-gradient(90deg, #f97316, #fb923c); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+
+/* --- Login Page --- */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--cream);
+}
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--paper);
+  border-radius: 16px;
+  padding: 40px 32px;
+  box-shadow: var(--shadow);
+}
+.login-brand {
+  text-align: center;
+  margin-bottom: 28px;
+}
+.login-logo {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: var(--coral);
+  color: #fff;
+  font: 700 28px/56px Georgia, serif;
+  text-align: center;
+}
+.login-brand h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -1px;
+  color: var(--deep);
+}
+.login-tagline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+  transition: background 0.15s, border-color 0.15s;
+}
+.google-btn:hover {
+  background: #f8f9fa;
+  border-color: #bbb;
+}
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.auth-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--cream);
+}
+.auth-toggle button {
+  flex: 1;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--muted);
+  transition: all 0.15s;
+}
+.auth-toggle button.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.login-field {
+  display: block;
+  margin-bottom: 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.login-field input {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 15px;
+  transition: border-color 0.15s;
+}
+.login-field input:focus {
+  border-color: var(--pine);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(23, 101, 84, 0.12);
+}
+.login-card .form-error {
+  margin: -8px 0 16px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: #fef2f2;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+.guest-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+.guest-section p {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.guest-section button {
+  font-size: 14px;
+}
+.login-card .primary.wide {
+  margin-bottom: 0;
+}
+.settings-google {
+  margin-bottom: 12px;
+}
+

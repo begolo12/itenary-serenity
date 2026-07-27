@@ -37,7 +37,8 @@ function sanitizeBrief(brief) {
 }
 
 function normalize(data) {
-  if (!data || typeof data !== "object" || !Array.isArray(data.activities) || !Array.isArray(data.tasks) || !Array.isArray(data.expenses)) throw new Error("AI mengembalikan struktur yang tidak valid.");
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error(`AI mengembalikan struktur yang tidak valid: ${JSON.stringify(Object.keys(data || {}))}`);
+  if (!Array.isArray(data.activities) || !Array.isArray(data.tasks) || !Array.isArray(data.expenses)) throw new Error(`AI mengembalikan struktur yang tidak valid: kunci "${Object.keys(data).join('", "')}" tidak memiliki activities/tasks/expenses sebagai array.`);
   const activities = data.activities.slice(0, 80).map((item) => ({
     id: crypto.randomUUID(), day: cleanText(item?.day, 40) || "Hari 1", time: cleanText(item?.time, 10) || "09:00",
     title: cleanText(item?.title, 160), note: cleanText(item?.note, 800),
@@ -67,7 +68,7 @@ export async function POST(request) {
     const timeout = setTimeout(() => controller.abort(), 30_000);
     let response;
     try {
-      const system = "You are an expert Indonesian travel planner. Return ONLY valid json. RULES: Amounts integer IDR, total MUST NOT exceed budget. Cover EVERY day with 3-5 activities with times (HH:MM). CRITICAL: Routes must be geographically possible (e.g. Depok-Sukabumi needs transit Bogor). Each note: specific location, transport mode, duration, tip. Generate 15-25 tasks: docs, health, packing, bookings, reminders. Expenses 8-15 items: transport, akomodasi, makan, tickets, local transport, tips, insurance, emergency 10%. Use Indonesian. Be specific and practical.";
+      const system = "Anda adalah asisten itinerary Indonesia. Kembalikan JSON dengan struktur PERSIS ini:\n{\n  \"activities\": [{ \"day\": \"Hari 1\", \"time\": \"HH:MM\", \"title\": \"Nama aktivitas\", \"note\": \"Lokasi, transport, durasi, tip\" }],\n  \"tasks\": [{ \"title\": \"Nama tugas\" }],\n  \"expenses\": [{ \"category\": \"Nama biaya\", \"amount\": 0 }]\n}\n\nRULES: Amounts integer IDR, total MUST NOT exceed budget. activities: 3-5 per day with times (HH:MM). CRITICAL: geographically possible routes (e.g. Depok-Sukabumi via Bogor). tasks: 15-25 items (docs, health, packing, bookings, reminders). expenses: 8-15 items (transport, akomodasi, makan, tickets, local transport, tips, insurance, emergency 10%). Gunakan Bahasa Indonesia.";
       const prompt = test ? `Return one short item per array to test connectivity. Context: ${JSON.stringify(brief)}` : `Create a practical itinerary from this sanitized brief: ${JSON.stringify(brief)}`;
       if (providerKey === "gemini") {
         response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${provider.model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
@@ -102,10 +103,16 @@ export async function POST(request) {
     const payload = await response.json();
     const content = providerKey === "gemini" ? payload?.candidates?.[0]?.content?.parts?.[0]?.text : payload?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || content.length > 100_000) throw new Error("Respons AI kosong atau terlalu besar.");
-    const result = normalize(parseStructuredAiContent(content));
+    let parsed;
+    try {
+      parsed = parseStructuredAiContent(content);
+    } catch {
+      throw new SyntaxError(`AI tidak mengembalikan JSON valid. Respons: ${content.slice(0, 500)}`);
+    }
+    const result = normalize(parsed);
     return NextResponse.json(test ? { ok: true, provider: providerKey, model: provider.model } : { ...result, provider: providerKey, model: provider.model });
   } catch (error) {
-    const message = error?.name === "AbortError" ? "Provider AI melewati batas waktu 25 detik." : error instanceof SyntaxError ? "AI tidak mengembalikan JSON valid." : error.message || "Permintaan AI gagal.";
+    const message = error?.name === "AbortError" ? "Provider AI melewati batas waktu 25 detik." : error.message || "Permintaan AI gagal.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

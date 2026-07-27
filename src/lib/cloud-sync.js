@@ -1,8 +1,10 @@
 import {
   createUserWithEmailAndPassword,
+  GoogleAuthProvider,
   onAuthStateChanged,
   signInAnonymously,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
 } from "firebase/auth";
 import { collection, deleteDoc, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
@@ -23,6 +25,14 @@ function requireCloud() {
 export async function signInToCloud() {
   requireCloud();
   return signInAnonymously(auth);
+}
+
+export async function signInWithGoogle() {
+  requireCloud();
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  const result = await signInWithPopup(auth, provider);
+  return result;
 }
 
 export async function createCloudAccount(email, password) {
@@ -74,7 +84,7 @@ export async function bootstrapWorkspace(user) {
   await withRetry(() => setDoc(doc(db, "users", user.uid), {
     uid: user.uid,
     email: user.email || null,
-    authType: user.isAnonymous ? "anonymous" : "password",
+    authType: user.isAnonymous ? "anonymous" : user.email ? "google" : "password",
     updatedAt: now,
   }, { merge: true }));
   await withRetry(() => setDoc(doc(db, "workspaces", user.uid), {
@@ -128,3 +138,4 @@ export function watchCloudTrips(uid, onTrips, onError) {
     }
   }, onError);
 }
+
