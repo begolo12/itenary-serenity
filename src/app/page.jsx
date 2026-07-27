@@ -6,6 +6,7 @@ import { deleteProviderKey, loadProviderKey, saveProviderKey } from "../lib/secu
 import {
   bootstrapWorkspace, createCloudAccount, deleteCloudTrip, saveCloudTrip,
   signInToCloud, signInWithCloudAccount, signInWithGoogle, signOutFromCloud, watchAuth, watchCloudTrips,
+  saveProviderKeyToCloud, loadProviderKeyFromCloud,
 } from "../lib/cloud-sync";
 import {
   STORAGE_KEY, blankTrip, createTemplate, dateLabel, downloadCsv, downloadIcs,
@@ -90,6 +91,7 @@ export default function Home() {
       await bootstrapWorkspace(currentUser);
       setCloudReady(true);
       setCloudState(navigator.onLine ? "synced" : "offline");
+      loadProviderKeyFromCloud(currentUser.uid, aiProvider).then((cloudKey) => { if (cloudKey) setApiKey(cloudKey); });
       cloudUnsubscribe.current = watchCloudTrips(currentUser.uid, (cloudTrips) => {
         setTrips((localTrips) => {
           const merged = [...localTrips];
@@ -548,13 +550,14 @@ function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
       await saveProviderKey(provider, apiKey);
+      if (user) await saveProviderKeyToCloud(user.uid, provider, apiKey);
       toast(`Koneksi ${AI_PROVIDERS[provider].label} berhasil. Kunci disimpan terenkripsi di perangkat ini.`);
     } catch (error) { toast(error.message || "Uji koneksi gagal.", "error"); } finally { setTesting(false); }
   };
   const rememberKey = async () => {
     if (!apiKey) { toast("Masukkan kunci API terlebih dahulu.", "error"); return; }
     setSavingKey(true);
-    try { await saveProviderKey(provider, apiKey); toast("Kunci API disimpan terenkripsi di perangkat ini."); }
+    try { await saveProviderKey(provider, apiKey); if (user) await saveProviderKeyToCloud(user.uid, provider, apiKey); toast("Kunci API disimpan terenkripsi di perangkat ini."); }
     catch { toast("Browser tidak dapat menyimpan kunci terenkripsi.", "error"); }
     finally { setSavingKey(false); }
   };

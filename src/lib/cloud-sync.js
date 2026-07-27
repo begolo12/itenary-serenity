@@ -139,3 +139,17 @@ export function watchCloudTrips(uid, onTrips, onError) {
   }, onError);
 }
 
+export async function saveProviderKeyToCloud(uid, provider, apiKey) {
+  requireCloud();
+  const ref = doc(db, "workspaces", uid, "secrets", "provider-keys");
+  await withRetry(() => setDoc(ref, { [`provider:${provider}`]: apiKey, updatedAt: new Date().toISOString() }, { merge: true }));
+}
+
+export async function loadProviderKeyFromCloud(uid, provider) {
+  requireCloud();
+  const ref = doc(db, "workspaces", uid, "secrets", "provider-keys");
+  const snapshot = await withRetry(() => getDoc(ref));
+  if (!snapshot.exists()) return "";
+  return snapshot.data()[`provider:${provider}`] || "";
+}
+

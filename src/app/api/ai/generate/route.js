@@ -38,13 +38,14 @@ function sanitizeBrief(brief) {
 
 function normalize(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error(`AI mengembalikan struktur yang tidak valid: ${JSON.stringify(Object.keys(data || {}))}`);
-  if (!Array.isArray(data.activities) || !Array.isArray(data.tasks) || !Array.isArray(data.expenses)) throw new Error(`AI mengembalikan struktur yang tidak valid: kunci "${Object.keys(data).join('", "')}" tidak memiliki activities/tasks/expenses sebagai array.`);
-  const activities = data.activities.slice(0, 80).map((item) => ({
+  const root = data.itinerary || data.data || data.trip || data.response || data.result || data;
+  if (!Array.isArray(root.activities) || !Array.isArray(root.tasks) || !Array.isArray(root.expenses)) throw new Error(`AI mengembalikan struktur yang tidak valid: kunci "${Object.keys(root).join('", "')}" tidak memiliki activities/tasks/expenses sebagai array.`);
+  const activities = root.activities.slice(0, 80).map((item) => ({
     id: crypto.randomUUID(), day: cleanText(item?.day, 40) || "Hari 1", time: cleanText(item?.time, 10) || "09:00",
     title: cleanText(item?.title, 160), note: cleanText(item?.note, 800),
   })).filter((item) => item.title);
-  const tasks = data.tasks.slice(0, 120).map((item) => ({ id: crypto.randomUUID(), title: cleanText(item?.title, 250), done: false })).filter((item) => item.title);
-  const expenses = data.expenses.slice(0, 80).map((item) => ({ id: crypto.randomUUID(), category: cleanText(item?.category, 200), amount: Math.max(0, Math.round(Number(item?.amount) || 0)) })).filter((item) => item.category);
+  const tasks = root.tasks.slice(0, 120).map((item) => ({ id: crypto.randomUUID(), title: cleanText(item?.title, 250), done: false })).filter((item) => item.title);
+  const expenses = root.expenses.slice(0, 80).map((item) => ({ id: crypto.randomUUID(), category: cleanText(item?.category, 200), amount: Math.max(0, Math.round(Number(item?.amount) || 0)) })).filter((item) => item.category);
   if (!activities.length || !tasks.length || !expenses.length) throw new Error("Hasil AI tidak cukup lengkap.");
   return { activities, tasks, expenses };
 }
@@ -68,7 +69,7 @@ export async function POST(request) {
     const timeout = setTimeout(() => controller.abort(), 30_000);
     let response;
     try {
-      const system = "Anda adalah asisten itinerary Indonesia. Kembalikan JSON dengan struktur PERSIS ini:\n{\n  \"activities\": [{ \"day\": \"Hari 1\", \"time\": \"HH:MM\", \"title\": \"Nama aktivitas\", \"note\": \"Lokasi, transport, durasi, tip\" }],\n  \"tasks\": [{ \"title\": \"Nama tugas\" }],\n  \"expenses\": [{ \"category\": \"Nama biaya\", \"amount\": 0 }]\n}\n\nRULES: Amounts integer IDR, total MUST NOT exceed budget. activities: 3-5 per day with times (HH:MM). CRITICAL: geographically possible routes (e.g. Depok-Sukabumi via Bogor). tasks: 15-25 items (docs, health, packing, bookings, reminders). expenses: 8-15 items (transport, akomodasi, makan, tickets, local transport, tips, insurance, emergency 10%). Gunakan Bahasa Indonesia.";
+      const system = "Anda adalah asisten itinerary Indonesia. Kembalikan JSON dengan struktur PERSIS ini (hanya tiga array di tingkat atas, tanpa key wrapper):\n{\n  \"activities\": [{ \"day\": \"Hari 1\", \"time\": \"09:00\", \"title\": \"Nama aktivitas\", \"note\": \"Lokasi, transport, durasi, tip\" }],\n  \"tasks\": [{ \"title\": \"Nama tugas\" }],\n  \"expenses\": [{ \"category\": \"Transport\", \"amount\": 500000 }]\n}\n\nRULES: Amounts integer IDR, total MUST NOT exceed budget. activities: 3-5 per day with times (HH:MM). CRITICAL: geographically possible routes (e.g. Depok-Sukabumi via Bogor). tasks: 15-25 items (docs, health, packing, bookings, reminders). expenses: 8-15 items (transport, akomodasi, makan, tickets, local transport, tips, insurance, emergency 10%). Gunakan Bahasa Indonesia.";
       const prompt = test ? `Return one short item per array to test connectivity. Context: ${JSON.stringify(brief)}` : `Create a practical itinerary from this sanitized brief: ${JSON.stringify(brief)}`;
       if (providerKey === "gemini") {
         response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${provider.model}:generateContent?key=${encodeURIComponent(apiKey)}`, {

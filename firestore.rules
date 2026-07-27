@@ -64,6 +64,10 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      match /secrets/{document} {
+        allow read, write: if owner(workspaceId);
+      }
+
       match /trips/{tripId} {
         allow read: if member(workspaceId);
         allow create, update, delete: if canEdit(workspaceId);
