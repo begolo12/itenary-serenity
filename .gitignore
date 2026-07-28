@@ -33,4 +33,9 @@ Thumbs.db
 .idea/
 
 .vercel
-.env*
+
+# build artifacts
+build_*.txt
+build_*.b64
+out.txt
+temp.txt

@@ -9,6 +9,7 @@ import {
 } from "firebase/auth";
 import { collection, deleteDoc, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import { auth, db, firebaseConfigured } from "./firebase";
+import { enqueueCloudTrip, offlineQueueSize, readOfflineQueue, writeOfflineQueue } from "./offline-queue.js";
 
 export function watchAuth(callback) {
   if (!firebaseConfigured || !auth) {
@@ -50,10 +51,10 @@ export async function signOutFromCloud() {
   return signOut(auth);
 }
 
-export const mergeCloudTrip = (localTrip, cloudTrip) => ({
+export const mergeCloudTrip = (localTrip = {}, cloudTrip = {}) => ({
   ...localTrip,
   ...cloudTrip,
-  photo: cloudTrip.photo ?? localTrip.photo ?? null,
+  photo: cloudTrip.hasPhoto === false ? null : cloudTrip.photo ?? localTrip.photo ?? null,
 });
 
 function cloudErrorCode(error) {
@@ -119,24 +120,69 @@ export async function bootstrapWorkspace(user) {
 }
 
 export { withRetry };
+export { enqueueCloudTrip, offlineQueueSize };
+
+export async function flushCloudQueue(workspaceId, uid) {
+  const queue = readOfflineQueue();
+  const pending = [];
+  const conflicts = [];
+  for (const item of queue) {
+    if (item.workspaceId !== workspaceId || item.uid !== uid) {
+      pending.push(item);
+      continue;
+    }
+    try {
+      await saveCloudTrip(item.workspaceId, item.uid, item.trip, { queueOnFailure: false });
+    } catch (error) {
+      if (error?.code === "cloud/conflict") conflicts.push(item.trip?.title || item.trip?.id || "Itinerary");
+      else pending.push(item);
+    }
+  }
+  writeOfflineQueue(pending);
+  return { flushed: queue.length - pending.length - conflicts.length, conflicts };
+}
+
+function cloudConflictError() {
+  const error = new Error("Cloud memiliki perubahan yang lebih baru. Periksa versi sebelum menimpa.");
+  error.code = "cloud/conflict";
+  return error;
+}
+
 
 function cloudTrip(trip, workspaceId, uid) {
   const { photo, ...safeTrip } = trip;
   return { ...safeTrip, workspaceId, createdBy: uid, hasPhoto: Boolean(photo) };
 }
 
-export async function saveCloudTrip(workspaceId, uid, trip) {
+export async function saveCloudTrip(workspaceId, uid, trip, { queueOnFailure = true } = {}) {
   requireCloud();
-  await setDoc(doc(db, "workspaces", workspaceId, "trips", trip.id), cloudTrip(trip, workspaceId, uid));
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    enqueueCloudTrip(workspaceId, uid, trip);
+    return { queued: true };
+  }
+  const tripRef = doc(db, "workspaces", workspaceId, "trips", trip.id);
   const photoRef = doc(db, "workspaces", workspaceId, "trips", trip.id, "photos", "cover");
-  if (trip.photo) {
-    await setDoc(photoRef, {
-      ...trip.photo,
-      createdAt: trip.photo.createdAt || new Date().toISOString(),
-      createdBy: uid,
-    });
-  } else {
-    await deleteDoc(photoRef);
+  try {
+    const current = await getDoc(tripRef);
+    const currentUpdated = Date.parse(current.data()?.updatedAt || "");
+    const localUpdated = Date.parse(trip.updatedAt || "");
+    if (current.exists() && currentUpdated && localUpdated && currentUpdated > localUpdated) throw cloudConflictError();
+    if (trip.photo) {
+      await setDoc(photoRef, {
+        ...trip.photo,
+        createdAt: trip.photo.createdAt || new Date().toISOString(),
+        createdBy: uid,
+      });
+    } else {
+      await deleteDoc(photoRef);
+    }
+    await setDoc(tripRef, cloudTrip(trip, workspaceId, uid));
+    return { queued: false };
+  } catch (error) {
+    if (queueOnFailure && error?.code !== "cloud/conflict" && (isTransient(error) || (typeof navigator !== "undefined" && navigator.onLine === false))) {
+      enqueueCloudTrip(workspaceId, uid, trip);
+    }
+    throw error;
   }
 }
 
@@ -242,8 +288,9 @@ export async function joinWorkspaceByCode(uid, rawCode) {
   return { id: workspaceId, name: invite.workspaceName || "Workspace", role: "editor", inviteCode };
 }
 
-export async function inviteUserToWorkspace(ownerUid, workspaceId, rawMemberCode) {
+export async function inviteUserToWorkspace(ownerUid, workspaceId, rawMemberCode, requestedRole = "editor") {
   requireCloud();
+  const role = ["editor", "viewer"].includes(requestedRole) ? requestedRole : "editor";
   const memberCode = String(rawMemberCode || "").replace(/\D/g, "").slice(0, MEMBER_CODE_LENGTH);
   if (memberCode.length !== MEMBER_CODE_LENGTH) throw new Error("Kode user harus 8 angka.");
   const memberCodeSnapshot = await withRetry(() => getDoc(doc(db, "memberCodes", memberCode)));
@@ -261,10 +308,10 @@ export async function inviteUserToWorkspace(ownerUid, workspaceId, rawMemberCode
   if (existingMember.exists()) return { uid: invitedUser.uid, memberCode, alreadyMember: true };
   const now = new Date().toISOString();
   await withRetry(() => setDoc(memberRef, {
-    uid: invitedUser.uid, role: "editor", joinedAt: now, invitedBy: ownerUid, memberCode,
+    uid: invitedUser.uid, role, joinedAt: now, invitedBy: ownerUid, memberCode,
   }));
   await withRetry(() => setDoc(doc(db, "users", invitedUser.uid, "workspaces", workspaceId), {
-    workspaceId, name: workspaceSnapshot.data().name || "Workspace", role: "editor", memberCode, joinedAt: now, updatedAt: now,
+    workspaceId, name: workspaceSnapshot.data().name || "Workspace", role, inviteCode: workspaceSnapshot.data().inviteCode || "", memberCode, joinedAt: now, updatedAt: now,
   }));
   return { uid: invitedUser.uid, memberCode, alreadyMember: false };
 }
@@ -275,29 +322,98 @@ export function watchCloudWorkspaces(uid, onWorkspaces, onError) {
   }, onError);
 }
 
-export async function saveSharedApiKey(provider, apiKey) {
-  requireCloud();
-  const ref = doc(db, "_appSettings", "provider-keys");
-  await withRetry(() => setDoc(ref, { [`provider:${provider}`]: apiKey, updatedAt: new Date().toISOString() }, { merge: true }));
+
+export function cloudMessage(error) {
+  if (error?.code === "permission-denied") return "Cloud menolak akses. Periksa bahwa Anonymous Auth aktif dan aturan workspace mengizinkan anggota.";
+  if (error?.code === "unavailable") return "Cloud tidak tersedia. Perubahan tetap aman di perangkat dan akan dicoba lagi.";
+  return `Sinkronisasi cloud gagal: ${error?.message || "kesalahan tidak dikenal"}`;
+}
+function cloudId(prefix) {
+  return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
-export async function loadSharedApiKey(provider) {
-  requireCloud();
-  const ref = doc(db, "_appSettings", "provider-keys");
-  const snapshot = await withRetry(() => getDoc(ref));
-  if (!snapshot.exists()) return "";
-  return snapshot.data()[`provider:${provider}`] || "";
+async function writeTripAudit(workspaceId, tripId, uid, action, metadata = {}) {
+  const createdAt = new Date().toISOString();
+  await setDoc(doc(db, "workspaces", workspaceId, "trips", tripId, "auditLogs", cloudId("log")), {
+    action, actorUid: uid, createdAt, ...metadata,
+  });
 }
 
-export async function sharedApiKeyExists() {
+export function watchTripCollaboration(workspaceId, tripId, callbacks = {}) {
   requireCloud();
-  const ref = doc(db, "_appSettings", "provider-keys");
-  const snapshot = await withRetry(() => getDoc(ref));
-  return snapshot.exists();
+  const root = (collectionName) => collection(db, "workspaces", workspaceId, "trips", tripId, collectionName);
+  const subscriptions = [
+    ["comments", "comments"],
+    ["approvals", "approvals"],
+    ["versions", "versions"],
+    ["auditLogs", "auditLogs"],
+  ].map(([collectionName, callbackName]) => onSnapshot(root(collectionName), (snapshot) => {
+    const entries = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    entries.sort((a, b) => String(b.createdAt || b.updatedAt || "").localeCompare(String(a.createdAt || a.updatedAt || "")));
+    callbacks[callbackName]?.(entries);
+  }, callbacks.onError));
+  return () => subscriptions.forEach((unsubscribe) => unsubscribe());
 }
 
-export const SUPER_ADMIN_EMAIL = "begolo111@gmail.com";
+export async function addTripComment(workspaceId, tripId, uid, text) {
+  requireCloud();
+  const comment = String(text || "").trim();
+  if (!comment) throw new Error("Komentar tidak boleh kosong.");
+  if (comment.length > 1000) throw new Error("Komentar maksimal 1.000 karakter.");
+  const createdAt = new Date().toISOString();
+  await setDoc(doc(db, "workspaces", workspaceId, "trips", tripId, "comments", cloudId("comment")), {
+    text: comment, actorUid: uid, createdAt, resolved: false,
+  });
+  await writeTripAudit(workspaceId, tripId, uid, "comment.created");
+}
 
-export function isSuperAdmin(user) {
-  return user?.email === SUPER_ADMIN_EMAIL;
+export async function setTripApproval(workspaceId, tripId, uid, status, note = "") {
+  requireCloud();
+  const allowed = ["pending", "approved", "changes_requested"];
+  if (!allowed.includes(status)) throw new Error("Status approval tidak valid.");
+  const updatedAt = new Date().toISOString();
+  await setDoc(doc(db, "workspaces", workspaceId, "trips", tripId, "approvals", uid), {
+    uid, status, note: String(note || "").slice(0, 500), updatedAt,
+  });
+  await writeTripAudit(workspaceId, tripId, uid, "approval.updated", { status });
+}
+
+export async function createTripVersion(workspaceId, trip, uid, note = "") {
+  requireCloud();
+  const createdAt = new Date().toISOString();
+  const snapshot = cloudTrip(trip, workspaceId, uid);
+  delete snapshot.workspaceId;
+  delete snapshot.createdBy;
+  await setDoc(doc(db, "workspaces", workspaceId, "trips", trip.id, "versions", cloudId("version")), {
+    createdAt, actorUid: uid, note: String(note || "").slice(0, 300), snapshot,
+  });
+  await writeTripAudit(workspaceId, trip.id, uid, "version.created", { note: String(note || "").slice(0, 300) });
+}
+
+export async function createPublicTripShare(workspaceId, trip, uid, days = 7) {
+  requireCloud();
+  const duration = Math.min(30, Math.max(1, Number(days) || 7));
+  const shareId = cloudId("share").replace(/[^a-zA-Z0-9-]/g, "").slice(0, 50);
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + duration * 24 * 60 * 60 * 1000);
+  const snapshot = cloudTrip(trip, workspaceId, uid);
+  delete snapshot.workspaceId;
+  delete snapshot.createdBy;
+  delete snapshot.photo;
+  await setDoc(doc(db, "publicShares", shareId), {
+    shareId, workspaceId, tripId: trip.id, title: trip.title || "Itinerary", snapshot,
+    createdBy: uid, createdAt, expiresAt,
+  });
+  await writeTripAudit(workspaceId, trip.id, uid, "share.created", { shareId, expiresAt: expiresAt.toISOString() });
+  return { shareId, expiresAt: expiresAt.toISOString() };
+}
+
+export async function getPublicTripShare(shareId) {
+  if (!firebaseConfigured || !db) throw new Error("Cloud belum dikonfigurasi.");
+  const snapshot = await getDoc(doc(db, "publicShares", String(shareId || "")));
+  if (!snapshot.exists()) throw new Error("Tautan share tidak ditemukan.");
+  const data = snapshot.data();
+  const expiresAt = data.expiresAt?.toDate ? data.expiresAt.toDate() : new Date(data.expiresAt);
+  if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date()) throw new Error("Tautan share sudah kedaluwarsa.");
+  return { ...data, expiresAt: expiresAt.toISOString() };
 }

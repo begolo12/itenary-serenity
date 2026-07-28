@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   signInWithGoogle,
   signInToCloud,
   signInWithCloudAccount,
   createCloudAccount,
+  watchAuth,
 } from "../../lib/cloud-sync";
 
 export default function LoginPage() {
@@ -16,6 +17,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => watchAuth((currentUser) => {
+    if (currentUser) router.replace("/");
+  }), [router]);
 
   const handleGoogle = async () => {
     setBusy(true);

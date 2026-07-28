@@ -14,6 +14,7 @@
     "firebase:use": "firebase use --add",
     "firebase:check": "node --env-file=.env.local verify-firebase.mjs",
     "firebase:emulators": "firebase emulators:start",
+    "firebase:purge-legacy-keys": "node --env-file=.env.local scripts/purge-legacy-provider-keys.mjs",
     "firebase:deploy": "firebase deploy --only firestore:rules,firestore:indexes"
   },
   "keywords": [],
@@ -22,10 +23,12 @@
   "type": "module",
   "dependencies": {
     "firebase": "^12.16.0",
+    "firebase-admin": "^14.2.0",
     "jsonrepair": "^3.15.0",
     "next": "^16.2.12",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "fake-indexeddb": "^6.2.5",

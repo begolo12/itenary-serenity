@@ -91,7 +91,7 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid)
           || (signedIn()
             && userId == request.auth.uid
-            && request.resource.data.role == 'editor'
+            && request.resource.data.role in ['editor', 'viewer']
             && request.resource.data.inviteCode is string
             && get(/databases/$(database)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.workspaceId == workspaceId);
         allow update, delete: if owner(workspaceId);
@@ -144,6 +144,16 @@ service cloud.firestore {
           allow read: if member(workspaceId);
           allow create, update, delete: if canEdit(workspaceId);
         }
+        match /approvals/{approvalId} {
+          allow read: if member(workspaceId);
+          allow create, update, delete: if canEdit(workspaceId);
+        }
+
+        match /auditLogs/{logId} {
+          allow read: if member(workspaceId);
+          allow create: if canEdit(workspaceId);
+          allow update, delete: if owner(workspaceId);
+        }
 
         match /photos/{photoId} {
           allow read: if member(workspaceId);
@@ -163,9 +173,17 @@ service cloud.firestore {
       }
     }
 
+  match /publicShares/{shareId} {
+    allow read: if resource.data.expiresAt is timestamp && resource.data.expiresAt > request.time;
+    allow create: if canEdit(request.resource.data.workspaceId)
+      && request.resource.data.shareId == shareId
+      && request.resource.data.expiresAt is timestamp
+      && request.resource.data.expiresAt > request.time;
+    allow update, delete: if canEdit(resource.data.workspaceId);
+  }
+
   match /_appSettings/{document} {
-    allow read: if signedIn();
-    allow write: if signedIn() && request.auth.token.email == 'begolo111@gmail.com';
+    allow read, write: if false;
   }
 
   match /{document=**} {
