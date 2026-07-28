@@ -42,6 +42,39 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow create, read, update, delete: if signedIn() && request.auth.uid == userId;
+
+      match /workspaces/{workspaceId} {
+        allow read: if signedIn() && request.auth.uid == userId;
+        allow create, update: if (signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.workspaceId == workspaceId)
+          || (signedIn()
+            && owner(workspaceId)
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.memberCode is string
+            && get(/databases/$(database)/documents/memberCodes/$(request.resource.data.memberCode)).data.uid == userId);
+        allow delete: if signedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /inviteCodes/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.code == code
+        && owner(request.resource.data.workspaceId);
+      allow update: if signedIn()
+        && resource.data.workspaceId == request.resource.data.workspaceId
+        && request.resource.data.code == code
+        && owner(resource.data.workspaceId);
+      allow delete: if signedIn() && owner(resource.data.workspaceId);
+    }
+
+    match /memberCodes/{code} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.code == code
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
     match /workspaces/{workspaceId} {
@@ -55,7 +88,12 @@ service cloud.firestore {
           || (signedIn()
             && userId == request.auth.uid
             && request.resource.data.role == 'owner'
-            && get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid);
+            && get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid)
+          || (signedIn()
+            && userId == request.auth.uid
+            && request.resource.data.role == 'editor'
+            && request.resource.data.inviteCode is string
+            && get(/databases/$(database)/documents/inviteCodes/$(request.resource.data.inviteCode)).data.workspaceId == workspaceId);
         allow update, delete: if owner(workspaceId);
       }
 

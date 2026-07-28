@@ -8,13 +8,19 @@ export const blankTrip = {
   people: "2",
   purpose: "Leisure",
   budget: "5000000",
+  tripMode: "overnight",
+  roomMode: "single",
 };
 
-export function validateTrip(form) {
-  if (!form.origin?.trim() || !form.destination?.trim() || !form.startDate || !form.endDate) {
+export function validateTrip(form, { allowDestinationRecommendation = false } = {}) {
+  const destinationRequired = allowDestinationRecommendation || Boolean(form.destination?.trim());
+  if (!form.origin?.trim() || !destinationRequired || !form.startDate || !form.endDate) {
     return "Asal, tujuan, dan tanggal wajib diisi.";
   }
   if (form.endDate < form.startDate) return "Tanggal selesai tidak boleh sebelum tanggal mulai.";
+  if (!["day_trip", "overnight"].includes(form.tripMode)) return "Pilih tipe perjalanan.";
+  if (form.tripMode === "day_trip" && form.startDate !== form.endDate) return "Day trip harus memakai tanggal mulai dan selesai yang sama.";
+  if (form.tripMode === "overnight" && !["single", "separate"].includes(form.roomMode)) return "Pilih pengaturan room.";
   if (!Number.isFinite(Number(form.people)) || Number(form.people) < 1) return "Jumlah orang minimal 1.";
   if (!Number.isFinite(Number(String(form.budget).replace(/[^0-9]/g, ""))) || Number(String(form.budget).replace(/[^0-9]/g, "")) < 0) return "Anggaran tidak boleh negatif.";
   return "";
@@ -22,12 +28,14 @@ export function validateTrip(form) {
 
 export function createTemplate(form) {
   const destination = form.destination.trim();
+  const destinationLabel = destination || "destinasi rekomendasi AI";
   const budget = Number(String(form.budget || 0).replace(/[^0-9]/g, ""));
   const now = new Date().toISOString();
+  const dayTrip = form.tripMode === "day_trip";
   return {
     ...form,
     id: crypto.randomUUID(),
-    title: `${form.purpose} di ${destination}`,
+    title: `${form.purpose} di ${destinationLabel}`,
     people: Number(form.people),
     budget,
     status: "draft",
@@ -35,14 +43,18 @@ export function createTemplate(form) {
     createdAt: now,
     updatedAt: now,
     photo: null,
-    activities: [
-      { id: crypto.randomUUID(), day: "Hari 1", time: "09:00", title: `Tiba dan orientasi ${destination}`, note: `Berangkat dari ${form.origin}.` },
-      { id: crypto.randomUUID(), day: "Hari 1", time: "13:00", title: "Makan siang dan check-in", note: "Konfirmasi akomodasi sebelum berangkat." },
+    activities: dayTrip ? [
+      { id: crypto.randomUUID(), day: "Hari 1", time: "09:00", title: `Tiba dan orientasi ${destinationLabel}`, note: `Berangkat dari ${form.origin}.` },
+      { id: crypto.randomUUID(), day: "Hari 1", time: "13:00", title: "Makan siang dan aktivitas utama", note: `Disusun untuk perjalanan ${form.purpose.toLowerCase()}.` },
+      { id: crypto.randomUUID(), day: "Hari 1", time: "17:00", title: "Perjalanan pulang", note: "Sisakan waktu untuk perjalanan kembali." },
+    ] : [
+      { id: crypto.randomUUID(), day: "Hari 1", time: "09:00", title: `Tiba dan orientasi ${destinationLabel}`, note: `Berangkat dari ${form.origin}.` },
+      { id: crypto.randomUUID(), day: "Hari 1", time: "13:00", title: "Makan siang dan check-in", note: `Konfirmasi akomodasi ${form.roomMode === "separate" ? "dengan room terpisah" : "satu room"}.` },
       { id: crypto.randomUUID(), day: "Hari 2", time: "10:00", title: "Aktivitas utama", note: `Disusun untuk perjalanan ${form.purpose.toLowerCase()}.` },
     ],
     tasks: [
       { id: crypto.randomUUID(), title: "Pesan transportasi", done: false },
-      { id: crypto.randomUUID(), title: "Konfirmasi akomodasi", done: false },
+      ...(dayTrip ? [] : [{ id: crypto.randomUUID(), title: `Konfirmasi akomodasi · ${form.roomMode === "separate" ? "room terpisah" : "satu room"}`, done: false }]),
       { id: crypto.randomUUID(), title: "Siapkan dokumen perjalanan", done: false },
     ],
     expenses: [

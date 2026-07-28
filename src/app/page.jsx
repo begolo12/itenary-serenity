@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { compressPhotoForFirestore } from "../lib/image-compression";
 import {
-  bootstrapWorkspace, createCloudAccount, deleteCloudTrip, saveCloudTrip,
-  signInToCloud, signInWithCloudAccount, signInWithGoogle, signOutFromCloud, watchAuth, watchCloudTrips,
+  bootstrapWorkspace, createCloudAccount, createWorkspace, deleteCloudTrip, inviteUserToWorkspace, joinWorkspaceByCode, saveCloudTrip,
+  signInToCloud, signInWithCloudAccount, signInWithGoogle, signOutFromCloud, watchAuth, watchCloudTrips, watchCloudWorkspaces,
   saveSharedApiKey, loadSharedApiKey, sharedApiKeyExists, isSuperAdmin,
 } from "../lib/cloud-sync";
 import {
@@ -17,6 +17,8 @@ const tabs = [
   ["budget", "Anggaran"], ["checklist", "Checklist"],
 ];
 const CLOUD_UID_KEY = "serenity-itinerary-cloud-uid";
+const ACTIVE_WORKSPACE_KEY = "serenity-itinerary-active-workspace";
+const VALID_VIEWS = new Set(["home", "new", "detail", "settings", "calendar"]);
 const AI_PROVIDERS = {
   deepseek: { label: "DeepSeek", model: "deepseek-v4-flash" },
   openai: { label: "OpenAI", model: "gpt-4o-mini" },
@@ -36,7 +38,12 @@ export default function Home() {
   const [cloudState, setCloudState] = useState("local");
   const [cloudReady, setCloudReady] = useState(false);
   const [cloudError, setCloudError] = useState("");
+  const [workspaces, setWorkspaces] = useState([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(null);
+  const [memberCode, setMemberCode] = useState("");
+  const [workspaceTripsReady, setWorkspaceTripsReady] = useState(false);
   const cloudUnsubscribe = useRef(null);
+  const workspaceUnsubscribe = useRef(null);
   const deletedIds = useRef(new Set());
   const autoAuthAttempted = useRef(false);
 
@@ -45,6 +52,7 @@ export default function Home() {
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (VALID_VIEWS.has(saved?.view)) setView(saved.view);
       if (Array.isArray(saved?.trips)) {
         setTrips(saved.trips);
         setSelectedId(saved.selectedId || saved.trips[0]?.id || null);
@@ -57,14 +65,20 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify({ trips, selectedId }));
-  }, [hydrated, trips, selectedId]);
+    if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify({ trips, selectedId, view }));
+  }, [hydrated, trips, selectedId, view]);
 
   useEffect(() => watchAuth(async (currentUser) => {
     cloudUnsubscribe.current?.();
     cloudUnsubscribe.current = null;
+    workspaceUnsubscribe.current?.();
+    workspaceUnsubscribe.current = null;
     setUser(currentUser);
     setCloudReady(false);
+    setWorkspaceTripsReady(false);
+    setWorkspaces([]);
+    setActiveWorkspaceId(null);
+    setMemberCode("");
     setCloudError("");
     if (!currentUser) {
       setCloudState("local");
@@ -87,21 +101,19 @@ export default function Home() {
     localStorage.setItem(CLOUD_UID_KEY, currentUser.uid);
     setCloudState("connecting");
     try {
-      await bootstrapWorkspace(currentUser);
+      const defaultWorkspace = await bootstrapWorkspace(currentUser);
+      setMemberCode(defaultWorkspace.memberCode || "");
       setCloudReady(true);
       setCloudState(navigator.onLine ? "synced" : "offline");
       loadSharedApiKey(aiProvider).then((sharedKey) => { if (sharedKey) setApiKey(sharedKey); });
-      cloudUnsubscribe.current = watchCloudTrips(currentUser.uid, (cloudTrips) => {
-        setTrips((localTrips) => {
-          const merged = [...localTrips];
-          cloudTrips.filter((cloud) => !deletedIds.current.has(cloud.id)).forEach((cloud) => {
-            const index = merged.findIndex((local) => local.id === cloud.id);
-            if (index < 0) merged.push(cloud);
-            else if ((cloud.updatedAt || "") > (merged[index].updatedAt || "")) merged[index] = { ...cloud, photo: merged[index].photo || null };
-          });
-          return merged;
+      workspaceUnsubscribe.current = watchCloudWorkspaces(currentUser.uid, (nextWorkspaces) => {
+        setWorkspaces(nextWorkspaces);
+        setActiveWorkspaceId((current) => {
+          const stored = localStorage.getItem(ACTIVE_WORKSPACE_KEY);
+          if (current && nextWorkspaces.some((workspace) => workspace.id === current)) return current;
+          if (stored && nextWorkspaces.some((workspace) => workspace.id === stored)) return stored;
+          return nextWorkspaces[0]?.id || defaultWorkspace.id;
         });
-        setCloudState(navigator.onLine ? "synced" : "offline");
       }, (error) => {
         setCloudState("error");
         setCloudError(cloudMessage(error));
@@ -112,14 +124,39 @@ export default function Home() {
     }
   }), []);
 
-  useEffect(() => () => cloudUnsubscribe.current?.(), []);
+  useEffect(() => () => {
+    cloudUnsubscribe.current?.();
+    workspaceUnsubscribe.current?.();
+  }, []);
 
   useEffect(() => {
-    if (!cloudReady || !user || !hydrated) return undefined;
+    cloudUnsubscribe.current?.();
+    cloudUnsubscribe.current = null;
+    if (!cloudReady || !user || !activeWorkspaceId) return undefined;
+    setWorkspaceTripsReady(false);
+    setTrips([]);
+    setSelectedId(null);
+    localStorage.setItem(ACTIVE_WORKSPACE_KEY, activeWorkspaceId);
+    cloudUnsubscribe.current = watchCloudTrips(activeWorkspaceId, (cloudTrips) => {
+      const visibleTrips = cloudTrips.filter((cloud) => !deletedIds.current.has(cloud.id));
+      setTrips(visibleTrips);
+      setSelectedId((current) => visibleTrips.some((trip) => trip.id === current) ? current : visibleTrips[0]?.id || null);
+      setWorkspaceTripsReady(true);
+      setCloudState(navigator.onLine ? "synced" : "offline");
+    }, (error) => {
+      setWorkspaceTripsReady(false);
+      setCloudState("error");
+      setCloudError(cloudMessage(error));
+    });
+    return () => cloudUnsubscribe.current?.();
+  }, [activeWorkspaceId, cloudReady, user]);
+
+  useEffect(() => {
+    if (!cloudReady || !user || !activeWorkspaceId || !workspaceTripsReady || !hydrated) return undefined;
     setCloudState(navigator.onLine ? "saving" : "offline");
     const timer = setTimeout(async () => {
       try {
-        await Promise.all(trips.map((trip) => saveCloudTrip(user.uid, trip)));
+        await Promise.all(trips.map((trip) => saveCloudTrip(activeWorkspaceId, user.uid, trip)));
         setCloudState(navigator.onLine ? "synced" : "offline");
         setCloudError("");
       } catch (error) {
@@ -128,7 +165,7 @@ export default function Home() {
       }
     }, 800);
     return () => clearTimeout(timer);
-  }, [trips, cloudReady, user, hydrated]);
+  }, [trips, activeWorkspaceId, cloudReady, user, hydrated, workspaceTripsReady]);
 
   useEffect(() => {
     const online = () => setCloudState(user ? "saving" : "local");
@@ -140,6 +177,20 @@ export default function Home() {
 
   const selected = trips.find((trip) => trip.id === selectedId);
   const nav = (target) => setView(target);
+  const switchWorkspace = (workspaceId) => {
+    if (!workspaces.some((workspace) => workspace.id === workspaceId)) return;
+    localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspaceId);
+    setWorkspaceTripsReady(false);
+    setActiveWorkspaceId(workspaceId);
+    setSelectedId(null);
+    if (view === "detail" || view === "new") setView("home");
+  };
+  const activateWorkspace = (workspace) => {
+    if (!workspace?.id) return;
+    localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspace.id);
+    setWorkspaceTripsReady(false);
+    setActiveWorkspaceId(workspace.id);
+  };
   const openTrip = (id) => { setSelectedId(id); setTab("overview"); setView("detail"); };
   const updateTrip = (update) => setTrips((current) => current.map((trip) => trip.id === selectedId ? { ...trip, ...update, updatedAt: new Date().toISOString() } : trip));
   const addTrip = (trip) => { setTrips((current) => [trip, ...current]); setSelectedId(trip.id); setTab("overview"); setView("detail"); };
@@ -150,16 +201,16 @@ export default function Home() {
     setSelectedId(null);
     setView("home");
     if (cloudReady && user) {
-      try { await deleteCloudTrip(user.uid, trip.id); } catch (error) { toast(`Terhapus lokal, tetapi cloud gagal: ${cloudMessage(error)}`, "error"); return; }
+      try { await deleteCloudTrip(activeWorkspaceId, trip.id); } catch (error) { toast(`Terhapus lokal, tetapi cloud gagal: ${cloudMessage(error)}`, "error"); return; }
     }
     toast("Itinerary dihapus.");
   };
 
   return (
     <main className="shell">
-      <Sidebar view={view} trips={trips} nav={nav} openTrip={openTrip} cloudState={cloudState} />
+      <Sidebar view={view} trips={trips} nav={nav} openTrip={openTrip} cloudState={cloudState} workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} switchWorkspace={switchWorkspace} />
       <section className="content">
-        <Topbar view={view} selected={selected} cloudState={cloudState} user={user} />
+        <Topbar view={view} selected={selected} cloudState={cloudState} user={user} workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} switchWorkspace={switchWorkspace} />
         {cloudError && <Status message={cloudError} kind="error" onClose={() => setCloudError("")} />}
         {notice && <Status {...notice} onClose={() => setNotice(null)} />}
         {!hydrated && <Loading />}
@@ -167,7 +218,7 @@ export default function Home() {
         {hydrated && view === "new" && <TripCreator apiKey={apiKey} provider={aiProvider} addTrip={addTrip} cancel={() => nav("home")} toast={toast} />}
         {hydrated && view === "detail" && selected && <TripDetail trip={selected} tab={tab} setTab={setTab} updateTrip={updateTrip} removeTrip={removeTrip} toast={toast} cloudReady={cloudReady} />}
         {hydrated && view === "detail" && !selected && <Empty title="Itinerary tidak ditemukan" text="Pilih itinerary dari beranda atau buat rencana baru." action={() => nav("home")} actionText="Ke beranda" />}
-        {hydrated && view === "settings" && <Settings apiKey={apiKey} setApiKey={setApiKey} provider={aiProvider} setProvider={setAiProvider} user={user} cloudState={cloudState} cloudReady={cloudReady} toast={toast} />}
+        {hydrated && view === "settings" && <Settings apiKey={apiKey} setApiKey={setApiKey} provider={aiProvider} setProvider={setAiProvider} user={user} memberCode={memberCode} cloudState={cloudState} cloudReady={cloudReady} toast={toast} workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} switchWorkspace={switchWorkspace} activateWorkspace={activateWorkspace} />}
         {hydrated && view === "calendar" && <CalendarView trips={trips} openTrip={openTrip} create={() => nav("new")} />}
       </section>
       <BottomNav view={view} nav={nav} openTrip={openTrip} selectedId={selectedId} trips={trips} />
@@ -181,7 +232,7 @@ function cloudMessage(error) {
   return `Sinkronisasi cloud gagal: ${error?.message || "kesalahan tidak dikenal"}`;
 }
 
-function Sidebar({ view, trips, nav, openTrip, cloudState }) {
+function Sidebar({ view, trips, nav, openTrip, cloudState, workspaces, activeWorkspaceId, switchWorkspace }) {
   return <aside className="sidebar">
     <button className="brand" onClick={() => nav("home")}><b>S</b><span>Serenity<small>ITINERARY</small></span></button>
     <button className="primary wide" onClick={() => nav("new")}><span aria-hidden="true">＋</span> Buat itinerary</button>
@@ -189,18 +240,29 @@ function Sidebar({ view, trips, nav, openTrip, cloudState }) {
       <button className={view === "home" ? "active" : ""} onClick={() => nav("home")}><Icon>⌂</Icon> Beranda</button>
       <button className={view === "detail" ? "active" : ""} onClick={() => trips[0] ? openTrip(trips[0].id) : nav("new")}><Icon>≡</Icon> Itinerary <span className="count">{trips.length}</span></button>
       <button className={view === "settings" ? "active" : ""} onClick={() => nav("settings")}><Icon>⚙</Icon> Pengaturan</button>
-      <button className={view === "calendar" ? "active" : ""} onClick={() => nav("calendar")}><Icon>📅</Icon> Kalender</button>
+       <button className={view === "calendar" ? "active" : ""} onClick={() => nav("calendar")}><Icon>▦</Icon> Kalender</button>
     </nav>
-    <div className="sync-card"><i className={cloudState} /><div><strong>{syncLabel(cloudState)}</strong><small>{cloudState === "local" ? "Simpan perjalanan ke cloud" : "Workspace pribadi"}</small></div>{cloudState === "local" && <button className="sync-login" onClick={() => window.location.href = "/login"}>Login</button>}</div>
-  </aside>;
+     <div className="sidebar-footer"><WorkspacePicker workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} switchWorkspace={switchWorkspace} /><div className="sync-card"><i className={cloudState} /><div><strong>{syncLabel(cloudState)}</strong><small>{cloudState === "local" ? "Simpan perjalanan ke cloud" : "Sinkronisasi workspace"}</small></div>{cloudState === "local" && <button className="sync-login" onClick={() => window.location.href = "/login"}>Login</button>}</div></div>
+   </aside>;
 }
 
 function Icon({ children }) { return <span className="nav-icon" aria-hidden="true">{children}</span>; }
 function syncLabel(state) { return ({ local: "Mode lokal", connecting: "Menyiapkan cloud", saving: "Menyimpan...", synced: "Cloud tersinkron", offline: "Offline · lokal aman", error: "Cloud bermasalah" })[state] || state; }
 
-function Topbar({ view, selected, cloudState, user }) {
+function Topbar({ view, selected, cloudState, user, workspaces, activeWorkspaceId, switchWorkspace }) {
   const title = view === "home" ? "Rencanakan dengan tenang." : view === "new" ? "Perjalanan baru" : view === "settings" ? "Pengaturan" : view === "calendar" ? "Kalender perjalanan" : selected?.title || "Itinerary";
-  return <header className="topbar"><div><p className="eyebrow">SERENITY ATLAS</p><h1>{title}</h1></div><div className={`cloud-state ${cloudState}`}><i /><span>{user ? "Workspace anonim" : "Penyimpanan lokal"}<strong>{syncLabel(cloudState)}</strong></span></div></header>;
+  return <header className="topbar"><div className="topbar-main"><p className="eyebrow">SERENITY ATLAS</p><h1>{title}</h1></div><div className="topbar-actions"><WorkspacePicker className="mobile-workspace-picker" workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} switchWorkspace={switchWorkspace} /><div className={`cloud-state ${cloudState}`}><i /><span>{user ? "Workspace tersinkron" : "Penyimpanan lokal"}<strong>{syncLabel(cloudState)}</strong></span></div></div></header>;
+}
+
+function WorkspacePicker({ workspaces, activeWorkspaceId, switchWorkspace, className = "" }) {
+  const active = workspaces.find((workspace) => workspace.id === activeWorkspaceId);
+  return <label className={`workspace-picker ${className}`}>
+    <span className="workspace-picker-copy"><strong>{active?.name || "Memuat workspace"}</strong><small>Workspace aktif</small></span>
+    <select value={activeWorkspaceId || ""} onChange={(event) => switchWorkspace(event.target.value)} disabled={!workspaces.length} aria-label="Pilih workspace aktif">
+      {!workspaces.length && <option value="">Memuat workspace...</option>}
+      {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name || "Workspace"}</option>)}
+    </select>
+  </label>;
 }
 
 function Status({ message, kind = "success", onClose }) { return <div className={`notice-bar ${kind}`} role={kind === "error" ? "alert" : "status"}><span>{message}</span><button onClick={onClose} aria-label="Tutup pemberitahuan">×</button></div>; }
@@ -344,7 +406,7 @@ function CityAutocomplete({ value, onChange, placeholder }) {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
-  return <div ref={ref} className="city-autocomplete"><input type="text" value={input} onChange={(e) => { setInput(e.target.value); setShow(true); }} onFocus={() => setShow(true)} placeholder={placeholder} /><button type="button" className="clear-input" onClick={() => { setInput(""); onChange(""); }} hidden={!input}>&times;</button>{show && input && filtered.length > 0 && <ul className="city-suggestions">{filtered.map((c) => <li key={c} onMouseDown={() => { setInput(c); onChange(c); setShow(false); }}>{c}</li>)}</ul>}</div>;
+  return <div ref={ref} className="city-autocomplete"><input type="text" value={input} onChange={(e) => { const next = e.target.value; setInput(next); onChange(next); setShow(true); }} onFocus={() => setShow(true)} placeholder={placeholder} /><button type="button" className="clear-input" onClick={() => { setInput(""); onChange(""); }} hidden={!input}>&times;</button>{show && input && filtered.length > 0 && <ul className="city-suggestions">{filtered.map((c) => <li key={c} onMouseDown={() => { setInput(c); onChange(c); setShow(false); }}>{c}</li>)}</ul>}</div>;
 }
 
 const formatBudget = (value) => {
@@ -366,32 +428,34 @@ function TripCreator({ apiKey, provider, addTrip, cancel, toast }) {
     toast("Template deterministik dibuat secara lokal. Tidak ada AI yang dipanggil.");
   };
   const makeAi = async () => {
-    const message = validateTrip(form);
+    const message = validateTrip(form, { allowDestinationRecommendation: true });
     if (message) { setError(message); return; }
     if (!apiKey) { setError(`Masukkan dan simpan kunci API ${AI_PROVIDERS[provider].label} di Pengaturan.`); return; }
     setGenerating(true); setError("");
     try {
-      const response = await fetch("/api/ai/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, apiKey, brief: form }) });
+      const response = await fetch("/api/ai/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, apiKey, brief: { ...form, recommendDestination: !form.destination.trim() } }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Generasi gagal.");
       addTrip({ ...createTemplate(form), ...result, source: "ai" });
-      toast(`Draft ${AI_PROVIDERS[provider].label} selesai. Verifikasi jadwal, harga, dan detail keselamatan.`);
+       toast(`${result.recommendationSource ? "Rekomendasi dan draft" : "Draft"} ${AI_PROVIDERS[provider].label} selesai. Verifikasi jadwal, harga, dan detail keselamatan.`);
     } catch (fetchError) { setError(fetchError.message); } finally { setGenerating(false); }
   };
   return <form className="wizard card" onSubmit={makeLocal}>
     <div className="wizard-head"><div><p className="eyebrow">BRIEF PERJALANAN</p><h2>Berikan rute sebuah cerita.</h2></div><span className="step">01 / 01</span></div>
-    <p className="lead">Isi detail inti. Pilih template lokal yang deterministik atau buat draft AI dengan provider aktif dan kunci dari memori halaman ini.</p>
+     <p className="lead">Isi detail inti. Tulis satu atau beberapa destinasi, atau kosongkan tujuan agar Gemini mencari rekomendasi online yang sesuai.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="form-grid">
-      <label>Kota asal<CityAutocomplete value={form.origin} onChange={(value) => field("origin", value)} placeholder="Cari kota asal..." /></label>
-      <label>Tujuan<CityAutocomplete value={form.destination} onChange={(value) => field("destination", value)} placeholder="Cari kota tujuan..." /></label>
-      <Field label="Tanggal mulai" type="date" value={form.startDate} onChange={(value) => field("startDate", value)} required />
-      <Field label="Tanggal selesai" type="date" min={form.startDate} value={form.endDate} onChange={(value) => field("endDate", value)} required />
-      <Field label="Jumlah orang" type="number" min="1" step="1" value={form.people} onChange={(value) => field("people", value)} required />
-      <label>Jenis perjalanan<input list="purpose-list" value={form.purpose} onChange={(event) => field("purpose", event.target.value)} placeholder="Mis. Leisure, Bisnis, atau ketik sendiri..." /><datalist id="purpose-list"><option value="Leisure" /><option value="Bisnis" /><option value="Keluarga" /><option value="Backpacker" /><option value="Honeymoon" /><option value="Retreat" /><option value="Study tour" /><option value="Adventure" /><option value="Kuliner" /><option value="Budaya & Sejarah" /></datalist></label>
-      <label>Anggaran total (IDR)<input type="text" inputMode="numeric" value={formatBudget(form.budget)} onChange={(event) => { const raw = event.target.value.replace(/[^0-9]/g, ""); field("budget", raw); }} placeholder="Mis. 5.000.000" required /></label>
-    </div>
-    <div className="ai-choice"><span className="spark">✦</span><div><strong>{AI_PROVIDERS[provider].label} · {AI_PROVIDERS[provider].model}</strong><p>{apiKey ? "Kunci tersedia hanya selama halaman ini terbuka." : "Belum ada kunci di memori. Template lokal tetap tersedia."}</p></div></div>
+       <label>Kota asal<CityAutocomplete value={form.origin} onChange={(value) => field("origin", value)} placeholder="Cari kota asal..." /></label>
+       <label className="destination-field">Tujuan / rute <span className="optional-label">opsional untuk rekomendasi AI</span><CityAutocomplete value={form.destination} onChange={(value) => field("destination", value)} placeholder="Contoh: Bali, Ubud, Nusa Penida" /><small>{form.destination.trim() ? "AI akan mengikuti destinasi yang Anda tulis." : "Kosongkan untuk rekomendasi online dari Gemini."}</small></label>
+       <Field label="Tanggal mulai" type="date" value={form.startDate} onChange={(value) => { field("startDate", value); if (form.tripMode === "day_trip") field("endDate", value); }} required />
+       <Field label="Tanggal selesai" type="date" min={form.startDate} value={form.endDate} onChange={(value) => field("endDate", value)} disabled={form.tripMode === "day_trip"} required />
+       <Field label="Jumlah orang" type="number" min="1" step="1" value={form.people} onChange={(value) => field("people", value)} required />
+       <label>Jenis perjalanan<input list="purpose-list" value={form.purpose} onChange={(event) => field("purpose", event.target.value)} placeholder="Mis. Leisure, Bisnis, atau ketik sendiri..." /><datalist id="purpose-list"><option value="Leisure" /><option value="Bisnis" /><option value="Keluarga" /><option value="Backpacker" /><option value="Honeymoon" /><option value="Retreat" /><option value="Study tour" /><option value="Adventure" /><option value="Kuliner" /><option value="Budaya & Sejarah" /></datalist></label>
+       <label>Tipe perjalanan<select value={form.tripMode} onChange={(event) => { const nextMode = event.target.value; field("tripMode", nextMode); if (nextMode === "day_trip") { field("roomMode", "single"); if (form.startDate) field("endDate", form.startDate); } }}><option value="day_trip">1 day trip · tanpa menginap</option><option value="overnight">Menginap</option></select></label>
+       <label className={form.tripMode === "day_trip" ? "field-disabled" : ""}>Pengaturan room<select value={form.roomMode} onChange={(event) => field("roomMode", event.target.value)} disabled={form.tripMode === "day_trip"}><option value="single">Satu room</option><option value="separate">Room terpisah</option></select></label>
+       <label>Anggaran total (IDR)<input type="text" inputMode="numeric" value={formatBudget(form.budget)} onChange={(event) => { const raw = event.target.value.replace(/[^0-9]/g, ""); field("budget", raw); }} placeholder="Mis. 5.000.000" required /></label>
+     </div>
+     <div className="ai-choice"><span className="spark">✦</span><div><strong>{AI_PROVIDERS[provider].label} · {AI_PROVIDERS[provider].model}</strong><p>{form.destination.trim() ? "AI menyusun itinerary lengkap mengikuti destinasi dan preferensi Anda." : provider === "gemini" ? "Destinasi kosong: Gemini akan memakai Google Search untuk mencari rekomendasi." : "Destinasi kosong membutuhkan Gemini untuk rekomendasi online; provider lain tetap bisa dipakai jika destinasi diisi."}</p></div></div>
     <footer><button type="button" className="quiet" onClick={cancel}>Batal</button><button type="submit" className="outline">Gunakan template lokal</button><button type="button" className="primary" onClick={makeAi} disabled={generating}>{generating ? "Menyusun draft..." : `Buat dengan ${AI_PROVIDERS[provider].label}`}</button></footer>
   </form>;
 }
@@ -594,7 +658,7 @@ function EditorModal({ modal, close, saveItem, updateTrip }) {
 
 function typeLabel(type) { return ({ activity: "aktivitas", expense: "biaya", task: "tugas" })[type]; }
 
-function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, cloudReady, toast }) {
+function Settings({ apiKey, setApiKey, provider, setProvider, user, memberCode, cloudState, cloudReady, toast, workspaces, activeWorkspaceId, switchWorkspace, activateWorkspace }) {
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [authMode, setAuthMode] = useState("login");
@@ -602,6 +666,11 @@ function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, 
   const [password, setPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [workspaceCode, setWorkspaceCode] = useState("");
+  const [inviteMemberCode, setInviteMemberCode] = useState("");
+  const [inviteWorkspaceId, setInviteWorkspaceId] = useState(null);
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [currency, setCurrency] = useState("IDR");
   const [language] = useState("id");
   const admin = isSuperAdmin(user);
@@ -638,6 +707,49 @@ function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, 
     try { await saveSharedApiKey(provider, apiKey); toast("Kunci API global berhasil disimpan."); }
     catch { toast("Gagal menyimpan kunci. Pastikan Anda super admin.", "error"); }
     finally { setSavingKey(false); }
+  };
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) || workspaces[0];
+  const createNewWorkspace = async (event) => {
+    event.preventDefault();
+    if (!user || !workspaceName.trim()) { toast("Masukkan nama workspace terlebih dahulu.", "error"); return; }
+    setWorkspaceBusy(true);
+    try {
+      const workspace = await createWorkspace(user.uid, workspaceName);
+      setWorkspaceName("");
+      activateWorkspace(workspace);
+      toast(`Workspace "${workspace.name}" berhasil dibuat.`);
+    } catch (error) { toast(error.message || "Workspace gagal dibuat.", "error"); }
+    finally { setWorkspaceBusy(false); }
+  };
+  const joinExistingWorkspace = async (event) => {
+    event.preventDefault();
+    if (!user || !workspaceCode.trim()) { toast("Masukkan kode workspace terlebih dahulu.", "error"); return; }
+    setWorkspaceBusy(true);
+    try {
+      const workspace = await joinWorkspaceByCode(user.uid, workspaceCode);
+      setWorkspaceCode("");
+      activateWorkspace(workspace);
+      toast(`Berhasil bergabung ke "${workspace.name}".`);
+    } catch (error) { toast(error.message || "Gagal bergabung ke workspace.", "error"); }
+    finally { setWorkspaceBusy(false); }
+  };
+  const inviteMember = async (event) => {
+    event.preventDefault();
+    if (!user || !activeWorkspaceId || !inviteMemberCode.trim()) { toast("Masukkan kode user terlebih dahulu.", "error"); return; }
+    setWorkspaceBusy(true);
+    try {
+      const result = await inviteUserToWorkspace(user.uid, activeWorkspaceId, inviteMemberCode);
+      setInviteMemberCode("");
+      setInviteWorkspaceId(null);
+      toast(result.alreadyMember ? "User tersebut sudah ada di workspace." : "User berhasil ditambahkan ke workspace.");
+    } catch (error) { toast(error.message || "User gagal ditambahkan.", "error"); }
+    finally { setWorkspaceBusy(false); }
+  };
+  const copyWorkspaceCode = async (code) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast("Kode workspace disalin.");
+    } catch { toast(`Kode workspace: ${code}`); }
   };
   let i = 0;
   return (
@@ -702,19 +814,50 @@ function Settings({ apiKey, setApiKey, provider, setProvider, user, cloudState, 
           <span className="settings-number">{step[i++]}</span>
           <div>
             <p className="eyebrow">CLOUD SYNC</p>
-            <h2>Workspace pribadi</h2>
-            <p>Akun email menjaga akses itinerary tetap tersedia di perangkat lain.</p>
+             <h2>Workspace & anggota</h2>
+             <p>Buat beberapa ruang kerja, pilih workspace aktif, atau undang anggota dengan kode unik.</p>
           </div>
         </div>
-        {user ? (
-          <div className="sync-setting">
-            <div>
-              <span className={`state-dot ${cloudState}`} />
-              <strong>{syncLabel(cloudState)}</strong>
-              <small>{user.isAnonymous ? `Mode tamu · ${user.uid.slice(0, 8)}\u2026` : user.email}</small>
-            </div>
-            <button className="quiet" onClick={disconnect}>Keluar dari cloud</button>
-          </div>
+         {user ? (
+           <>
+             <div className="workspace-manager">
+               <div className="workspace-manager-head">
+                 <div><strong>Workspace Anda</strong><small>{workspaces.length} workspace tersedia</small></div>
+                 {activeWorkspace && <span className="workspace-active-label">Aktif</span>}
+               </div>
+               <div className="member-code-card"><div><strong>Kode user Anda</strong><small>Bagikan kode ini agar pemilik workspace bisa menambahkan Anda.</small></div><div><code>{memberCode || "--------"}</code><button type="button" onClick={() => copyWorkspaceCode(memberCode)} disabled={!memberCode}>Salin</button></div></div>
+               <div className="workspace-list">
+                 {!workspaces.length ? <p className="workspace-loading">Memuat workspace...</p> : workspaces.map((workspace) => (
+                   <article key={workspace.id} className={`workspace-item${workspace.id === activeWorkspaceId ? " active" : ""}`}>
+                     <button className="workspace-select" onClick={() => switchWorkspace(workspace.id)} aria-pressed={workspace.id === activeWorkspaceId}>
+                       <span className="workspace-mark">{(workspace.name || "W").slice(0, 1).toUpperCase()}</span>
+                       <span><strong>{workspace.name || "Workspace"}</strong><small>{workspace.role === "owner" ? "Pemilik" : "Editor"}{workspace.id === activeWorkspaceId ? " · sedang dipakai" : ""}</small></span>
+                     </button>
+                     <div className="workspace-code"><code>{workspace.inviteCode || "--------"}</code><button type="button" onClick={() => copyWorkspaceCode(workspace.inviteCode)} disabled={!workspace.inviteCode}>Salin kode</button></div>
+                     {workspace.role === "owner" && workspace.id === activeWorkspaceId && <><button type="button" className="workspace-invite" onClick={() => setInviteWorkspaceId(inviteWorkspaceId === workspace.id ? null : workspace.id)}>＋ Tambah user dengan kode</button>{inviteWorkspaceId === workspace.id && <form className="workspace-invite-form" onSubmit={inviteMember}><label>Kode user anggota<input value={inviteMemberCode} onChange={(event) => setInviteMemberCode(event.target.value.replace(/\D/g, "").slice(0, 8))} inputMode="numeric" maxLength={8} placeholder="8 angka" /></label><button className="primary" disabled={workspaceBusy}>Tambahkan</button></form>}</>}
+                   </article>
+                 ))}
+               </div>
+               <div className="workspace-actions">
+                 <form onSubmit={createNewWorkspace}>
+                   <label>Buat workspace baru<input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="Contoh: Tim Marketing" /></label>
+                   <button className="primary" disabled={workspaceBusy}>Buat workspace</button>
+                 </form>
+                 <form onSubmit={joinExistingWorkspace}>
+                   <label>Gabung dengan kode<input value={workspaceCode} onChange={(event) => setWorkspaceCode(event.target.value.replace(/\D/g, "").slice(0, 8))} inputMode="numeric" maxLength={8} placeholder="8 angka" /></label>
+                   <button className="outline" disabled={workspaceBusy}>Gabung</button>
+                 </form>
+               </div>
+             </div>
+             <div className="sync-setting">
+               <div>
+                 <span className={`state-dot ${cloudState}`} />
+                 <strong>{syncLabel(cloudState)}</strong>
+                 <small>{user.isAnonymous ? `Mode tamu · ${user.uid.slice(0, 8)}\u2026` : user.email}</small>
+               </div>
+               <button className="quiet" onClick={disconnect}>Keluar dari cloud</button>
+             </div>
+           </>
         ) : (
           <>
             <button className="google-btn settings-google" onClick={async () => { try { await signInWithGoogle(); toast("Berhasil masuk dengan Google. Menyinkronkan workspace..."); } catch (error) { toast(authMessage(error), "error"); } }}>
@@ -782,7 +925,7 @@ function authMessage(error) {
 
 const MONTHS = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
 const DAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
-const TONE_COLORS = ["#176554", "#b85d47", "#596e5b", "#6366f1", "#e47759", "#0e3b33"];
+const TONE_COLORS = ["#176b5b", "#e86f51", "#d9a441", "#2f7566", "#a43d23", "#0e3b33"];
 
 function CalendarView({ trips, openTrip, create }) {
   const today = new Date();
@@ -843,13 +986,14 @@ function CalendarView({ trips, openTrip, create }) {
 
   const monogram = (dest) => dest?.slice(0, 2).toUpperCase() || "??";
   const colorForTrip = (trip) => TONE_COLORS[trip.destination?.length % TONE_COLORS.length];
+  const detailTrip = selectedTrip || thisMonth[0] || nextMonthTrips[0] || null;
 
   const TripScheduleCard = ({ trip }) => {
     const done = trip.tasks.filter((t) => t.done).length;
     const total = trip.tasks.length;
     const pct = total ? Math.round(done / total * 100) : 0;
     return (
-      <button className="sched-card" onClick={() => { setSelectedTrip(trip); setActiveDay(null); }}>
+      <button className={`sched-card${detailTrip?.id === trip.id ? " selected" : ""}`} onClick={() => { setSelectedTrip(trip); setActiveDay(null); }} aria-pressed={detailTrip?.id === trip.id}>
         <span className="sched-mono" style={{ background: colorForTrip(trip) }}>{monogram(trip.destination)}</span>
         <div className="sched-body">
           <strong className="sched-title">{trip.title}</strong>
@@ -876,8 +1020,8 @@ function CalendarView({ trips, openTrip, create }) {
     <section className="scheduler-layout">
       <div className="scheduler-sidebar">
         <div className="scheduler-sidebar-header">
-          <span className="sched-icon">📅</span>
-          <h2>Jadwal Mendatang</h2>
+          <span className="calendar-glyph" aria-hidden="true" />
+          <div><h2>Jadwal mendatang</h2><p>Perjalanan terdekat Anda</p></div>
         </div>
         <div className="scheduler-sections">
           <div className="sched-section">
@@ -911,12 +1055,17 @@ function CalendarView({ trips, openTrip, create }) {
               <h2>{MONTHS[month]} {year}</h2>
               <button onClick={nextMonthNav} aria-label="Bulan berikutnya">›</button>
             </div>
-            <span className="calendar-total">{scheduled.length} ITINERARY</span>
+            <span className="calendar-total">{scheduled.length} itinerary</span>
+          </div>
+          <div className="calendar-legend" aria-label="Legenda kalender">
+            <span><i className="legend-today" />Hari ini</span>
+            <span><i className="legend-event" />Ada itinerary</span>
+            <span><i className="legend-done" />Selesai</span>
           </div>
 
           {!scheduled.length ? (
             <div className="empty card" style={{ marginTop: 16 }}>
-              <span className="empty-mark">📅</span>
+              <span className="empty-mark">▦</span>
               <h2>Belum ada itinerary terjadwal</h2>
               <p>Buat itinerary dengan tanggal mulai dan selesai agar muncul di kalender.</p>
               <button className="primary" onClick={create}>Buat itinerary pertama</button>
@@ -955,27 +1104,29 @@ function CalendarView({ trips, openTrip, create }) {
           )}
         </div>
 
-        {(selectedTrip || dayTripsForActive.length > 0) && (
+        {(detailTrip || dayTripsForActive.length > 0) && (
           <div className="trip-detail-card card">
-            {selectedTrip ? (
+            {detailTrip ? (
               <>
                 <div className="tdc-header">
-                  <span className="tdc-mono" style={{ background: colorForTrip(selectedTrip) }}>{monogram(selectedTrip.destination)}</span>
+                  <span className="tdc-mono" style={{ background: colorForTrip(detailTrip) }}>{monogram(detailTrip.destination)}</span>
                   <div>
-                    <h3>{selectedTrip.title}</h3>
+                    <span className="tdc-kicker">Itinerary terpilih</span>
+                    <h3>{detailTrip.title}</h3>
                     <div className="tdc-meta-row">
-                      <span>{dateFormat(selectedTrip.startDate)} - {dateFormat(selectedTrip.endDate)}</span>
-                      <span>{selectedTrip.people} orang</span>
+                      <span>{detailTrip.destination}</span>
+                      <span>{dateFormat(detailTrip.startDate)} - {dateFormat(detailTrip.endDate)}</span>
+                      <span>{detailTrip.people} orang</span>
                     </div>
                   </div>
-                  <button className="tdc-open-btn" onClick={() => openTrip(selectedTrip.id)}>Edit Itinerary</button>
+                  <button className="tdc-open-btn" onClick={() => openTrip(detailTrip.id)}>Buka itinerary</button>
                 </div>
                 <div className="tdc-tasks">
-                  <h4>Task List</h4>
-                  {selectedTrip.tasks.length === 0 ? (
+                  <div className="tdc-tasks-head"><h4>Task list</h4><span>{detailTrip.tasks.filter((task) => task.done).length}/{detailTrip.tasks.length} selesai</span></div>
+                  {detailTrip.tasks.length === 0 ? (
                     <p className="sched-empty-text">Belum ada tugas.</p>
                   ) : (
-                    selectedTrip.tasks.map((task, idx) => (
+                    detailTrip.tasks.slice(0, 3).map((task, idx) => (
                       <label key={idx} className={`tdc-task ${task.done ? "done" : ""}`}>
                         <span className="tdc-checkbox">{task.done ? "✓" : "○"}</span>
                         <span>{task.text}</span>
@@ -1033,8 +1184,8 @@ function BottomNav({ nav, openTrip, selectedId, trips, view }) {
       <button className={`fab ${view === "new" ? "active" : ""}`} onClick={() => nav("new")} aria-label="Buat itinerary">
         <span>＋</span>
       </button>
-      <button className={view === "calendar" ? "active" : ""} onClick={() => nav("calendar")}>
-        <Icon>📅</Icon>
+       <button className={view === "calendar" ? "active" : ""} onClick={() => nav("calendar")}>
+         <Icon>▦</Icon>
         <span>Kalender</span>
       </button>
       <button className={view === "settings" ? "active" : ""} onClick={() => nav("settings")}>

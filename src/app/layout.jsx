@@ -24,7 +24,7 @@ export default function RootLayout({ children }) {
     <html lang="id" className={`${manrope.variable} ${newsreader.variable}`}>
       <head>
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#176a59" />
+        <meta name="theme-color" content="#0e3b33" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -34,7 +34,7 @@ export default function RootLayout({ children }) {
       <body>
         {children}
         <script dangerouslySetInnerHTML={{
-          __html: `if("serviceWorker"in navigator){window.addEventListener("load",()=>{navigator.serviceWorker.register("/sw.js").catch(()=>{})})}`,
+          __html: `if("serviceWorker"in navigator){window.addEventListener("load",async()=>{try{const registration=await navigator.serviceWorker.register("/sw.js");registration.update()}catch{}})}`,
         }} />
       </body>
     </html>
