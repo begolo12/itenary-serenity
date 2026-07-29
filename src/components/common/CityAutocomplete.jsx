@@ -19,6 +19,10 @@ export function CityAutocomplete({ value, onChange, placeholder }) {
   const ref = useRef(null);
   const filtered = INDONESIAN_CITIES.filter((c) => c.toLowerCase().includes(input.toLowerCase())).slice(0, 5);
   useEffect(() => {
+    setInput(value || "");
+  }, [value]);
+
+  useEffect(() => {
     function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setShow(false); }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);

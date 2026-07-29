@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CityAutocomplete } from '../common/CityAutocomplete';
 import { Field } from '../common/Field';
 import { blankTrip, createTemplate, validateTrip } from '../../lib/trips';
