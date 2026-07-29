@@ -250,6 +250,10 @@ export function watchCloudTrips(workspaceId, onTrips, onError) {
 const WORKSPACE_CODE_LENGTH = 8;
 const MEMBER_CODE_LENGTH = 8;
 
+function createNumericCode(length) {
+  return String(Math.floor(10 ** (length - 1) + Math.random() * 9 * 10 ** (length - 1)));
+}
+
 function createWorkspaceCode() {
   return createNumericCode(WORKSPACE_CODE_LENGTH);
 }
@@ -265,10 +269,6 @@ async function uniqueWorkspaceCode() {
 
 function createMemberCode() {
   return createNumericCode(MEMBER_CODE_LENGTH);
-}
-
-function createNumericCode(length) {
-  return String(Math.floor(10 ** (length - 1) + Math.random() * 9 * 10 ** (length - 1)));
 }
 
 async function uniqueMemberCode() {
