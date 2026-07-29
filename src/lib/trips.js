@@ -48,6 +48,13 @@ export function validateTrip(form, { allowDestinationRecommendation = false } = 
   return "";
 }
 
+export const safeUUID = () => {
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
+    try { return globalThis.crypto.randomUUID(); } catch {}
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+};
+
 export function createTemplate(form) {
   const destination = String(form.destination || "").trim();
   const destinationLabel = destination || String(form.venue || "").trim() || "destinasi rekomendasi AI";
@@ -59,7 +66,7 @@ export function createTemplate(form) {
   const planType = PLAN_TYPES.includes(form.planType) ? form.planType : "trip";
   const planTypeLabel = PLAN_TYPE_LABELS[planType];
   const activity = (day, time, title, note, extra = {}) => ({
-    id: crypto.randomUUID(), day, time, title, note,
+    id: safeUUID(), day, time, title, note,
     location: destinationLabel, duration: "90 menit", transport: form.transportPreference || "mixed",
     estimatedCost: 0, category: "Aktivitas", bookingNote: "", done: false, ...extra,
   });
@@ -94,9 +101,9 @@ export function createTemplate(form) {
       activity("Hari 2", "10:00", "Aktivitas utama", `Sesuaikan dengan minat: ${interests.join(", ") || "fleksibel"}.`, { duration: "4 jam", category: "Aktivitas", estimatedCost: Math.round(estimateBudget * 0.2) }),
     ];
   })();
-  const seedTask = (title, category, note, priority = "sedang", phase = "before", due = form.startDate) => ({ id: crypto.randomUUID(), title, category, priority, due: due || "", note, done: false, status: "todo", phase, dependencies: [] });
-  const seedExpense = (category, description, amount, note) => ({ id: crypto.randomUUID(), category, description, amount: Math.round(estimateBudget * amount), paid: false, note, verificationStatus: "estimated" });
-  const seedDocument = (type, title, note) => ({ id: crypto.randomUUID(), type, title, status: "Perlu dicek", number: "", note });
+  const seedTask = (title, category, note, priority = "sedang", phase = "before", due = form.startDate) => ({ id: safeUUID(), title, category, priority, due: due || "", note, done: false, status: "todo", phase, dependencies: [] });
+  const seedExpense = (category, description, amount, note) => ({ id: safeUUID(), category, description, amount: Math.round(estimateBudget * amount), paid: false, note, verificationStatus: "estimated" });
+  const seedDocument = (type, title, note) => ({ id: safeUUID(), type, title, status: "Perlu dicek", number: "", note });
   const isTripPlan = planType === "trip";
   const templateTasks = isTripPlan
     ? [

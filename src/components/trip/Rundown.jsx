@@ -2,7 +2,7 @@
 import { useRef, useState } from 'react';
 import { PanelHead } from '../common/PanelHead';
 import { compressPhotoForFirestore } from '../../lib/image-compression';
-import { downloadIcs, rupiah } from '../../lib/trips';
+import { downloadIcs, rupiah, safeUUID } from '../../lib/trips';
 
 const parseTime = (value) => {
   const match = String(value || '').match(/(\d{1,2}):(\d{2})/);
@@ -54,7 +54,7 @@ export function Rundown({ trip, setModal, removeItem, updateTrip, toggleLock, to
     if (!file) return;
     try {
       const photo = await compressPhotoForFirestore(file);
-      updateTrip({ activities: activities.map((item) => item.id === activityId ? { ...item, photos: [...(item.photos || []), { ...photo, id: crypto.randomUUID(), uploadedAt: new Date().toISOString() }] } : item) });
+      updateTrip({ activities: activities.map((item) => item.id === activityId ? { ...item, photos: [...(item.photos || []), { ...photo, id: safeUUID(), uploadedAt: new Date().toISOString() }] } : item) });
       toast(`Foto dikompresi ${Math.round(photo.sizeBytes / 1024)} KB`);
     } catch (error) { toast(error.message, 'error'); }
     event.target.value = '';

@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { PLAN_TYPES, PLAN_TYPE_LABELS } from '../../lib/schemas/plan.js';
-import { validateTrip } from '../../lib/trips';
+import { validateTrip, safeUUID } from '../../lib/trips';
 import { Field } from '../common/Field';
 import { typeLabel } from './TripDetail';
 
@@ -64,7 +64,7 @@ function EditorModal({ modal, close, saveItem, updateTrip }) {
     const { unitPrice, actualAmount, ...safeData } = data;
     saveItem(key, {
       ...safeData,
-      id: data.id || crypto.randomUUID(),
+      id: data.id || safeUUID(),
       ...(type === 'expense' ? {
         amount: Number(String(data.amount).replace(/[^0-9]/g, '')),
         quantity: Number(data.quantity ?? 1),

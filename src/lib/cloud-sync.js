@@ -88,17 +88,21 @@ export async function bootstrapWorkspace(user) {
   const existingUser = await withRetry(() => getDoc(userRef));
   const existingUserData = existingUser.exists() ? existingUser.data() : {};
   const memberCode = existingUserData.memberCode || await uniqueMemberCode();
+
+  // ALWAYS ensure user doc has memberCode and memberCodes collection maps this code to user
+  await withRetry(() => setDoc(userRef, {
+    uid: user.uid,
+    email: user.email || null,
+    authType: user.isAnonymous ? "anonymous" : user.email ? "google" : "password",
+    memberCode,
+    updatedAt: now,
+  }, { merge: true }));
+
+  await withRetry(() => setDoc(doc(db, "memberCodes", memberCode), {
+    uid: user.uid, code: memberCode, memberCode, email: user.email || null, updatedAt: now,
+  }, { merge: true }));
+
   if (user.email === SUPER_ADMIN_EMAIL) {
-    await withRetry(() => setDoc(userRef, {
-      uid: user.uid,
-      email: user.email || null,
-      authType: user.isAnonymous ? "anonymous" : user.email ? "google" : "password",
-      memberCode,
-      updatedAt: now,
-    }, { merge: true }));
-    await withRetry(() => setDoc(doc(db, "memberCodes", memberCode), {
-      uid: user.uid, code: memberCode, memberCode, email: user.email || null, updatedAt: now,
-    }, { merge: true }));
     const workspaceRef = doc(db, "workspaces", user.uid);
     await withRetry(() => setDoc(workspaceRef, {
       createdBy: user.uid, updatedAt: now,
@@ -121,6 +125,7 @@ export async function bootstrapWorkspace(user) {
     }, { merge: true }));
     return { id: user.uid, name: workspaceName, role: "owner", inviteCode, memberCode };
   }
+
   if (existingUserData.status === "approved") {
     const wsRef = doc(db, "workspaces", user.uid);
     const memberRef = doc(db, "workspaces", user.uid, "members", user.uid);
@@ -144,16 +149,13 @@ export async function bootstrapWorkspace(user) {
     await withRetry(() => setDoc(userWsRef, {
       workspaceId: user.uid, name: wsData.name || "Workspace Pribadi", role: "owner", inviteCode, joinedAt: now, updatedAt: now,
     }, { merge: true }));
-    return { id: user.uid, name: wsData.name || "Workspace Pribadi", role: "owner", inviteCode, memberCode: existingUserData.memberCode || "" };
+    return { id: user.uid, name: wsData.name || "Workspace Pribadi", role: "owner", inviteCode, memberCode };
   }
+
   await withRetry(() => setDoc(userRef, {
-    uid: user.uid,
-    email: user.email || null,
-    authType: user.isAnonymous ? "anonymous" : user.email ? "google" : "password",
     status: "pending",
-    memberCode,
-    updatedAt: now,
   }, { merge: true }));
+
   return { pending: true, user: { uid: user.uid, email: user.email } };
 }
 
