@@ -11,6 +11,8 @@ import { collection, deleteDoc, doc, getDoc, onSnapshot, setDoc } from "firebase
 import { auth, db, firebaseConfigured } from "./firebase";
 import { enqueueCloudTrip, offlineQueueSize, readOfflineQueue, writeOfflineQueue } from "./offline-queue.js";
 
+export const SUPER_ADMIN_EMAIL = "superadmin@local.com";
+
 export function watchAuth(callback) {
   if (!firebaseConfigured || !auth) {
     callback(null);
@@ -86,38 +88,56 @@ export async function bootstrapWorkspace(user) {
   const existingUser = await withRetry(() => getDoc(userRef));
   const existingUserData = existingUser.exists() ? existingUser.data() : {};
   const memberCode = existingUserData.memberCode || await uniqueMemberCode();
+  if (user.email === SUPER_ADMIN_EMAIL) {
+    await withRetry(() => setDoc(userRef, {
+      uid: user.uid,
+      email: user.email || null,
+      authType: user.isAnonymous ? "anonymous" : user.email ? "google" : "password",
+      memberCode,
+      updatedAt: now,
+    }, { merge: true }));
+    await withRetry(() => setDoc(doc(db, "memberCodes", memberCode), {
+      uid: user.uid, code: memberCode, memberCode, email: user.email || null, updatedAt: now,
+    }, { merge: true }));
+    const workspaceRef = doc(db, "workspaces", user.uid);
+    await withRetry(() => setDoc(workspaceRef, {
+      createdBy: user.uid, updatedAt: now,
+    }, { merge: true }));
+    await withRetry(() => setDoc(doc(db, "workspaces", user.uid, "members", user.uid), {
+      uid: user.uid, role: "owner", joinedAt: now,
+    }, { merge: true }));
+    const existingWorkspace = await withRetry(() => getDoc(workspaceRef));
+    const existingData = existingWorkspace.exists() ? existingWorkspace.data() : {};
+    const inviteCode = existingData.inviteCode || await uniqueWorkspaceCode();
+    const workspaceName = existingData.name || "Workspace Pribadi";
+    await withRetry(() => setDoc(workspaceRef, {
+      name: workspaceName, inviteCode, createdBy: user.uid, createdAt: existingData.createdAt || now, updatedAt: now,
+    }, { merge: true }));
+    await withRetry(() => setDoc(doc(db, "inviteCodes", inviteCode), {
+      workspaceId: user.uid, workspaceName, ownerUid: user.uid, code: inviteCode, updatedAt: now,
+    }, { merge: true }));
+    await withRetry(() => setDoc(doc(db, "users", user.uid, "workspaces", user.uid), {
+      workspaceId: user.uid, name: workspaceName, role: "owner", inviteCode, joinedAt: existingData.createdAt || now, updatedAt: now,
+    }, { merge: true }));
+    return { id: user.uid, name: workspaceName, role: "owner", inviteCode, memberCode };
+  }
+  if (existingUserData.status === "approved") {
+    const wsRef = doc(db, "workspaces", user.uid);
+    const wsSnap = await withRetry(() => getDoc(wsRef));
+    const wsData = wsSnap.exists() ? wsSnap.data() : {};
+    return { id: user.uid, name: wsData.name || "Workspace Pribadi", role: "owner", inviteCode: wsData.inviteCode || "", memberCode: existingUserData.memberCode || "" };
+  }
   await withRetry(() => setDoc(userRef, {
     uid: user.uid,
     email: user.email || null,
     authType: user.isAnonymous ? "anonymous" : user.email ? "google" : "password",
+    status: "pending",
     memberCode,
     updatedAt: now,
   }, { merge: true }));
-  await withRetry(() => setDoc(doc(db, "memberCodes", memberCode), {
-    uid: user.uid, code: memberCode, memberCode, email: user.email || null, updatedAt: now,
-  }, { merge: true }));
-  const workspaceRef = doc(db, "workspaces", user.uid);
-  await withRetry(() => setDoc(workspaceRef, {
-    createdBy: user.uid, updatedAt: now,
-  }, { merge: true }));
-  await withRetry(() => setDoc(doc(db, "workspaces", user.uid, "members", user.uid), {
-    uid: user.uid, role: "owner", joinedAt: now,
-  }, { merge: true }));
-  const existingWorkspace = await withRetry(() => getDoc(workspaceRef));
-  const existingData = existingWorkspace.exists() ? existingWorkspace.data() : {};
-  const inviteCode = existingData.inviteCode || await uniqueWorkspaceCode();
-  const workspaceName = existingData.name || "Workspace Pribadi";
-  await withRetry(() => setDoc(workspaceRef, {
-    name: workspaceName, inviteCode, createdBy: user.uid, createdAt: existingData.createdAt || now, updatedAt: now,
-  }, { merge: true }));
-  await withRetry(() => setDoc(doc(db, "inviteCodes", inviteCode), {
-    workspaceId: user.uid, workspaceName, ownerUid: user.uid, code: inviteCode, updatedAt: now,
-  }, { merge: true }));
-  await withRetry(() => setDoc(doc(db, "users", user.uid, "workspaces", user.uid), {
-    workspaceId: user.uid, name: workspaceName, role: "owner", inviteCode, joinedAt: existingData.createdAt || now, updatedAt: now,
-  }, { merge: true }));
-  return { id: user.uid, name: workspaceName, role: "owner", inviteCode, memberCode };
+  return { pending: true, user: { uid: user.uid, email: user.email } };
 }
+
 
 export { withRetry };
 export { enqueueCloudTrip, offlineQueueSize };

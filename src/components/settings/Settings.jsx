@@ -1,11 +1,11 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   signInToCloud, signOutFromCloud, signInWithGoogle,
   signInWithCloudAccount, createCloudAccount,
   createWorkspace, joinWorkspaceByCode, inviteUserToWorkspace,
 } from "../../lib/cloud-sync";
-import { cloudMessage } from "../../lib/cloud-sync";
+import { cloudMessage, SUPER_ADMIN_EMAIL } from "../../lib/cloud-sync";
 import { getAiProviderStatus, generateWithAi } from "../../lib/ai-client";
 import { CURRENCY_KEY, CURRENCY_LIST } from "../../lib/trips";
 import { syncLabel } from "../layout/Sidebar";
@@ -53,6 +53,28 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
     getAiProviderStatus().then((result) => { if (active) setAiStatus(result.providers || {}); }).catch(() => { if (active) setAiStatus({}); }).finally(() => { if (active) setLoadingAi(false); });
     return () => { active = false; };
   }, [provider]);
+  const isSuperAdmin = user && user.email && user.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+  const [pendingUsers, setPendingUsers] = useState([]);
+  const [loadingPending, setLoadingPending] = useState(false);
+  const [actionUid, setActionUid] = useState(null);
+  const fetchPending = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    setLoadingPending(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch("/api/admin/pending", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) { const body = await res.json(); setPendingUsers(body.users ?? []); }
+    } catch {} finally { setLoadingPending(false); }
+  }, [isSuperAdmin, user]);
+  useEffect(() => { if (isSuperAdmin) fetchPending(); }, [isSuperAdmin, fetchPending]);
+  const handleAdminAction = async (uid, action) => {
+    setActionUid(uid);
+    try {
+      const token = await user.getIdToken();
+      await fetch("/api/admin/approve", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ uid, action }) });
+      setPendingUsers((prev) => prev.filter((u) => u.uid !== uid));
+    } catch {} finally { setActionUid(null); }
+  };
   const changeCurrency = (value) => { setCurrency(value); try { localStorage.setItem(CURRENCY_KEY, value); } catch {} };
   const connect = async () => { try { await signInToCloud(); toast("Mode tamu aktif. Menyiapkan workspace cloud..."); } catch (error) { toast(authMessage(error), "error"); } };
   const disconnect = async () => { try { await signOutFromCloud(); toast("Keluar dari cloud. Data lokal tetap tersedia."); } catch (error) { toast(cloudMessage(error), "error"); } };
@@ -259,6 +281,36 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
           </>
         )}
       </article>
+      {isSuperAdmin && (
+        <article className="settings card">
+          <div className="settings-title">
+            <div>
+              <p className="eyebrow">ADMIN PANEL</p>
+              <h2>Persetujuan akun</h2>
+            </div>
+          </div>
+          <div className="settings-form">
+            <div className="admin-pending-list">
+              {loadingPending ? (
+                <p>Memuat...</p>
+              ) : pendingUsers.length === 0 ? (
+                <p>Tidak ada pengguna menunggu.</p>
+              ) : pendingUsers.map((u) => (
+                <div key={u.uid} className="admin-pending-user">
+                  <span className="admin-pending-email">
+                    <strong>{u.email}</strong>
+                    <small>{u.registeredAt}</small>
+                  </span>
+                  <div className="admin-pending-actions">
+                    <button onClick={() => handleAdminAction(u.uid, "approve")} disabled={actionUid === u.uid}>{actionUid === u.uid ? "Memproses..." : "Setujui"}</button>
+                    <button onClick={() => handleAdminAction(u.uid, "reject")} disabled={actionUid === u.uid}>{actionUid === u.uid ? "Memproses..." : "Tolak"}</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </article>
+      )}
       <article className="privacy card">
         <span>i</span>
         <div>

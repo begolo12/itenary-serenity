@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { db } from "../lib/firebase";
 import {
   bootstrapWorkspace, deleteCloudTrip, saveCloudTrip, flushCloudQueue,
   watchAuth, watchCloudTrips, watchCloudWorkspaces,
@@ -46,6 +48,8 @@ export default function Home() {
   const workspaceUnsubscribe = useRef(null);
   const deletedIds = useRef(new Set());
   const persistedTripSignatures = useRef(new Map());
+  const [pendingApproval, setPendingApproval] = useState(false);
+  const pendingUnsubscribe = useRef(null);
   const activeWorkspaceRole = workspaces.find((workspace) => workspace.id === activeWorkspaceId)?.role || "owner";
   const readOnly = activeWorkspaceRole === "viewer";
 
@@ -99,6 +103,19 @@ export default function Home() {
     setCloudState("connecting");
     try {
       const defaultWorkspace = await bootstrapWorkspace(currentUser);
+      if (defaultWorkspace.pending) {
+        setPendingApproval(true);
+        setCloudReady(true);
+        setCloudState("pending");
+        pendingUnsubscribe.current = onSnapshot(doc(db, "users", currentUser.uid), (snap) => {
+          const data = snap.data();
+          if (data?.status === "approved") {
+            window.location.reload();
+          }
+        });
+        return;
+      }
+      setPendingApproval(false);
       setMemberCode(defaultWorkspace.memberCode || "");
       setCloudReady(true);
       setCloudState(navigator.onLine ? "synced" : "offline");
@@ -123,6 +140,7 @@ export default function Home() {
   useEffect(() => () => {
     cloudUnsubscribe.current?.();
     workspaceUnsubscribe.current?.();
+    pendingUnsubscribe.current?.();
   }, []);
 
   useEffect(() => {
@@ -239,6 +257,18 @@ export default function Home() {
     }
     toast("Itinerary dihapus.");
   };
+
+  if (pendingApproval) {
+    return (
+      <main className="auth-loading" aria-busy="true">
+        <div className="loading-card">
+          <h2>Akun menunggu persetujuan</h2>
+          <p>Admin akan menyetujui akun Anda segera. Halaman ini akan otomatis memuat setelah disetujui.</p>
+          <div className="loading"><i /><span>Menunggu persetujuan...</span></div>
+        </div>
+      </main>
+    );
+  }
 
   if (!authResolved || !user) {
     return (
