@@ -2056,6 +2056,26 @@ input[inputmode="numeric"] { font-variant-numeric: tabular-nums; }
   background: var(--soft);
 }
 
+.workspace-code button.workspace-delete-btn {
+  color: #d9534f;
+  border-color: rgba(217, 83, 79, 0.3);
+}
+
+.workspace-code button.workspace-delete-btn:hover {
+  border-color: #d9534f;
+  background: rgba(217, 83, 79, 0.08);
+}
+
+.workspace-code button.workspace-reset-btn {
+  color: #e67e22;
+  border-color: rgba(230, 126, 34, 0.3);
+}
+
+.workspace-code button.workspace-reset-btn:hover {
+  border-color: #e67e22;
+  background: rgba(230, 126, 34, 0.08);
+}
+
 .workspace-invite-form {
   display: flex;
   grid-column: 1 / -1;

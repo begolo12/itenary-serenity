@@ -20,12 +20,55 @@ const formatBudget = (value) => {
 
 const STEPS = ['Jenis & rute', 'Waktu & peserta', 'Preferensi & anggaran', 'Konfirmasi'];
 
+const DRAFT_STORAGE_KEY = 'serenity-itinerary-wizard-draft';
+
 function TripCreator({ provider, workspaceId, addTrip, cancel, toast }) {
-  const [form, setForm] = useState({ ...blankTrip });
-  const [step, setStep] = useState(1);
+  const [form, setForm] = useState(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && parsed.form) return { ...blankTrip, ...parsed.form };
+      }
+    } catch {}
+    return { ...blankTrip };
+  });
+  const [step, setStep] = useState(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.step >= 1 && parsed?.step <= 4) return parsed.step;
+      }
+    } catch {}
+    return 1;
+  });
+  const [hasRestoredDraft] = useState(() => {
+    try { return Boolean(localStorage.getItem(DRAFT_STORAGE_KEY)); } catch { return false; }
+  });
   const [error, setError] = useState('');
   const [generating, setGenerating] = useState(false);
   const [generationStage, setGenerationStage] = useState('');
+
+  // Auto-save form draft whenever form or step changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ form, step, savedAt: new Date().toISOString() }));
+    } catch {}
+  }, [form, step]);
+
+  const clearDraft = () => {
+    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch {}
+  };
+
+  const resetFormDraft = () => {
+    clearDraft();
+    setForm({ ...blankTrip });
+    setStep(1);
+    setError('');
+    toast('Draft formulir dibersihkan.');
+  };
+
   const field = (name, value) => setForm((current) => ({ ...current, [name]: value }));
   const participant = (name, value) => setForm((current) => {
     const participants = { ...current.participants, [name]: Math.max(0, Number(value || 0)) };
@@ -58,6 +101,7 @@ function TripCreator({ provider, workspaceId, addTrip, cancel, toast }) {
     event.preventDefault();
     const message = validateTrip(form);
     if (message) { setError(message); return; }
+    clearDraft();
     addTrip(createTemplate(form));
     toast('Template deterministik dibuat secara lokal. Tidak ada AI yang dipanggil.');
   };
@@ -71,6 +115,7 @@ function TripCreator({ provider, workspaceId, addTrip, cancel, toast }) {
     try {
       const result = await generateWithAi({ provider, workspaceId, brief: { ...form, recommendDestination: !String(form.destination || '').trim() && !String(form.venue || '').trim() && !form.locations.length } });
       setGenerationStage('Memeriksa struktur draft...');
+      clearDraft();
       addTrip({ ...createTemplate(form), ...result, source: 'ai' });
       toast(`${result.recommendationSource ? 'Rekomendasi dan draft' : 'Draft'} ${AI_PROVIDERS[provider].label} selesai. Verifikasi jadwal, harga, dan detail keselamatan.`);
     } catch (fetchError) {
@@ -81,6 +126,11 @@ function TripCreator({ provider, workspaceId, addTrip, cancel, toast }) {
     }
   };
 
+  const handleCancel = () => {
+    clearDraft();
+    cancel();
+  };
+
   return (
     <form className="wizard card" onSubmit={makeLocal}>
       <div className="wizard-head">
@@ -88,6 +138,12 @@ function TripCreator({ provider, workspaceId, addTrip, cancel, toast }) {
           <p className="eyebrow">BRIEF RENCANA</p>
           <h2>Mulai dari konteks yang penting.</h2>
           <p className="lead">Pilih jenis kegiatan, lalu isi lokasi, waktu, peserta, dan batasan. Detail dapat diedit setelah draft dibuat.</p>
+          {hasRestoredDraft && (
+            <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <small style={{ color: 'var(--pine)', fontWeight: 700 }}>✓ Draft tersimpan otomatis dipulihkan</small>
+              <button type="button" className="quiet" style={{ fontSize: '11px', padding: '2px 6px' }} onClick={resetFormDraft}>Kosongkan draft</button>
+            </div>
+          )}
         </div>
         <span className="step">0{step} / 0{STEPS.length}</span>
       </div>
@@ -155,7 +211,7 @@ function TripCreator({ provider, workspaceId, addTrip, cancel, toast }) {
       </div>
       <footer>
         {step > 1 && <button type='button' className='quiet' onClick={() => { setStep((current) => current - 1); setError(''); }}>Kembali</button>}
-        <button type='button' className='quiet' onClick={cancel}>Batal</button>
+        <button type='button' className='quiet' onClick={handleCancel}>Batal</button>
         {step < STEPS.length && <button type='button' className='primary' onClick={nextStep}>Lanjut</button>}
         {step === STEPS.length && <><button type='submit' className='outline'>Gunakan template lokal</button><button type='button' className='primary' onClick={makeAi} disabled={generating}>{generating ? 'Menyusun draft...' : `Buat dengan ${AI_PROVIDERS[provider].label}`}</button></>}
       </footer>

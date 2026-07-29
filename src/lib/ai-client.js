@@ -8,7 +8,13 @@ async function authHeaders() {
 
 async function readResponse(response) {
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || "Permintaan AI gagal.");
+  if (!response.ok) {
+    let errMessage = result.error || "Permintaan AI gagal.";
+    if (typeof errMessage === "string" && (errMessage.includes("UNAUTHENTICATED") || errMessage.includes("OAuth 2") || errMessage.includes("authentication credentials"))) {
+      errMessage = "Kunci/Token Firebase Admin di server tidak valid atau belum sesuai. Silakan hubungi admin server.";
+    }
+    throw new Error(errMessage);
+  }
   return result;
 }
 

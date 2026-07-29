@@ -280,11 +280,16 @@ async function uniqueMemberCode() {
   throw new Error("Kode user gagal dibuat. Coba lagi.");
 }
 
-export async function createWorkspace(uid, name) {
+export async function createWorkspace(uid, name, existingWorkspaces = []) {
   requireCloud();
-  const workspaceId = globalThis.crypto?.randomUUID?.() || `${uid}-${Date.now()}`;
   const workspaceName = name.trim();
   if (!workspaceName) throw new Error("Nama workspace wajib diisi.");
+
+  if (existingWorkspaces.some((w) => (w.name || "").trim().toLowerCase() === workspaceName.toLowerCase())) {
+    throw new Error(`Workspace dengan nama "${workspaceName}" sudah ada.`);
+  }
+
+  const workspaceId = globalThis.crypto?.randomUUID?.() || `${uid}-${Date.now()}`;
   const inviteCode = await uniqueWorkspaceCode();
   const now = new Date().toISOString();
   await withRetry(() => setDoc(doc(db, "workspaces", workspaceId), {
@@ -301,6 +306,31 @@ export async function createWorkspace(uid, name) {
   }));
   return { id: workspaceId, name: workspaceName, role: "owner", inviteCode };
 }
+
+export async function deleteWorkspace(uid, workspaceId) {
+  requireCloud();
+  if (workspaceId === uid) {
+    throw new Error("Workspace Pribadi tidak dapat dihapus. Gunakan fitur Reset Workspace untuk menghapusisinya.");
+  }
+  // Delete user's workspace mapping
+  await deleteDoc(doc(db, "users", uid, "workspaces", workspaceId));
+  // Delete member doc
+  await deleteDoc(doc(db, "workspaces", workspaceId, "members", uid));
+}
+
+export async function resetPersonalWorkspace(uid) {
+  requireCloud();
+  // Fetch all trips in personal workspace and delete them
+  const tripsRef = collection(db, "workspaces", uid, "trips");
+  const snapshot = await withRetry(() => getDoc(doc(db, "workspaces", uid))); // verification
+  // Delete subcollection trips
+  const tripsSnap = await withRetry(() => import("firebase/firestore").then(({ getDocs }) => getDocs(tripsRef)));
+  const batchDeletes = tripsSnap.docs.map(async (item) => {
+    await deleteCloudTrip(uid, item.id);
+  });
+  await Promise.all(batchDeletes);
+}
+
 
 export async function joinWorkspaceByCode(uid, rawCode) {
   requireCloud();

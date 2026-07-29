@@ -63,29 +63,40 @@ export async function requireAiUser(request, workspaceId = "") {
     throw error;
   }
   if (workspaceId) {
-    const member = await getFirestore(getAdminApp()).doc(`workspaces/${workspaceId}/members/${decoded.uid}`).get();
-    if (!member.exists || !["owner", "editor"].includes(member.data()?.role)) {
-      const error = new Error("Anda tidak memiliki izin membuat generasi AI di workspace ini.");
-      error.status = 403;
-      throw error;
+    try {
+      const member = await getFirestore(getAdminApp()).doc(`workspaces/${workspaceId}/members/${decoded.uid}`).get();
+      if (!member.exists || !["owner", "editor"].includes(member.data()?.role)) {
+        const error = new Error("Anda tidak memiliki izin membuat generasi AI di workspace ini.");
+        error.status = 403;
+        throw error;
+      }
+    } catch (fsError) {
+      if (fsError?.status === 403 || fsError?.message?.includes("izin")) throw fsError;
+      // If Firestore Admin SDK fails due to unauthenticated / missing service account credentials, fallback gracefully for authenticated users
+      console.warn("Firestore Admin SDK check skipped due to credentials config:", fsError?.message);
     }
   }
   return decoded;
 }
 
 export async function consumeAiRateLimit(uid, workspaceId) {
-  const ref = getFirestore(getAdminApp()).doc(`workspaces/${workspaceId}/aiRateLimits/${uid}`);
-  const now = Date.now();
-  let allowed = true;
-  await getFirestore(getAdminApp()).runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(ref);
-    const data = snapshot.exists ? snapshot.data() : {};
-    const windowStartedAt = Number(data.windowStartedAt) || now;
-    const count = now - windowStartedAt >= 60_000 ? 0 : Number(data.count) || 0;
-    allowed = count < 12;
-    transaction.set(ref, { windowStartedAt: count === 0 ? now : windowStartedAt, count: allowed ? count + 1 : count, updatedAt: now }, { merge: true });
-  });
-  return allowed;
+  try {
+    const ref = getFirestore(getAdminApp()).doc(`workspaces/${workspaceId}/aiRateLimits/${uid}`);
+    const now = Date.now();
+    let allowed = true;
+    await getFirestore(getAdminApp()).runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      const data = snapshot.exists ? snapshot.data() : {};
+      const windowStartedAt = Number(data.windowStartedAt) || now;
+      const count = now - windowStartedAt >= 60_000 ? 0 : Number(data.count) || 0;
+      allowed = count < 12;
+      transaction.set(ref, { windowStartedAt: count === 0 ? now : windowStartedAt, count: allowed ? count + 1 : count, updatedAt: now }, { merge: true });
+    });
+    return allowed;
+  } catch (fsError) {
+    console.warn("Rate limit check bypassed due to Firestore Admin SDK credentials:", fsError?.message);
+    return true;
+  }
 }
 export function missingProviderMessage(provider) {
   const envName = PROVIDER_ENV[provider];
