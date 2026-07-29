@@ -5,6 +5,7 @@ import {
   signInWithCloudAccount, createCloudAccount,
   createWorkspace, joinWorkspaceByCode, inviteUserToWorkspace,
   deleteWorkspace, leaveWorkspace, resetPersonalWorkspace,
+  watchWorkspaceMembers, removeWorkspaceMember,
 } from "../../lib/cloud-sync";
 import { cloudMessage, SUPER_ADMIN_EMAIL } from "../../lib/cloud-sync";
 import { getAiProviderStatus, generateWithAi } from "../../lib/ai-client";
@@ -44,6 +45,8 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
   const [inviteRole, setInviteRole] = useState("editor");
   const [inviteWorkspaceId, setInviteWorkspaceId] = useState(null);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [activeMembers, setActiveMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const [currency, setCurrency] = useState("IDR");
   const [language] = useState("id");
   const step = ["01", "02", "03"];
@@ -68,6 +71,38 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
     } catch {} finally { setLoadingPending(false); }
   }, [isSuperAdmin, user]);
   useEffect(() => { if (isSuperAdmin) fetchPending(); }, [isSuperAdmin, fetchPending]);
+  const isOwner = activeWorkspace?.role === "owner";
+  useEffect(() => {
+    if (!activeWorkspaceId || !isOwner) {
+      setActiveMembers([]);
+      setLoadingMembers(false);
+      return () => {};
+    }
+    setLoadingMembers(true);
+    const unsubscribe = watchWorkspaceMembers(
+      activeWorkspaceId,
+      (members) => {
+        setActiveMembers(members);
+        setLoadingMembers(false);
+      },
+      () => {
+        setLoadingMembers(false);
+      }
+    );
+    return () => unsubscribe();
+  }, [activeWorkspaceId, isOwner]);
+  const removeMember = async (memberUid) => {
+    if (!activeWorkspaceId || !window.confirm("Keluarkan user ini dari workspace?")) return;
+    setWorkspaceBusy(true);
+    try {
+      await removeWorkspaceMember(activeWorkspaceId, memberUid);
+      toast("User berhasil dikeluarkan dari workspace.");
+    } catch (error) {
+      toast(error.message || "Gagal mengeluarkan user.", "error");
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
   const handleAdminAction = async (uid, action) => {
     setActionUid(uid);
     try {
@@ -271,7 +306,52 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
                         <button type="button" className="workspace-leave-btn" onClick={() => exitWorkspace(workspace)} disabled={workspaceBusy} title="Keluar dari workspace ini">Keluar</button>
                       )}
                     </div>
-                    {workspace.role === "owner" && workspace.id === activeWorkspaceId && <><button type="button" className="workspace-invite" onClick={() => setInviteWorkspaceId(inviteWorkspaceId === workspace.id ? null : workspace.id)}>＋ Tambah user dengan kode</button>{inviteWorkspaceId === workspace.id && <form className="workspace-invite-form" onSubmit={inviteMember}><label>Kode user anggota<input value={inviteMemberCode} onChange={(event) => setInviteMemberCode(event.target.value.replace(/\D/g, "").slice(0, 8))} inputMode="numeric" maxLength={8} placeholder="8 angka" /></label><label>Peran<select value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}><option value="editor">Editor · dapat mengubah</option><option value="viewer">Viewer · hanya membaca</option></select></label><button className="primary" disabled={workspaceBusy}>Tambahkan</button></form>}</>}
+                    {workspace.role === "owner" && workspace.id === activeWorkspaceId && (
+                      <div className="workspace-members-section">
+                        <button type="button" className="workspace-invite" onClick={() => setInviteWorkspaceId(inviteWorkspaceId === workspace.id ? null : workspace.id)}>
+                          ＋ Tambah user dengan kode
+                        </button>
+                        {inviteWorkspaceId === workspace.id && (
+                          <form className="workspace-invite-form" onSubmit={inviteMember}>
+                            <label>Kode user anggota
+                              <input value={inviteMemberCode} onChange={(event) => setInviteMemberCode(event.target.value.replace(/\D/g, "").slice(0, 8))} inputMode="numeric" maxLength={8} placeholder="8 angka" />
+                            </label>
+                            <label>Peran
+                              <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}>
+                                <option value="editor">Editor · dapat mengubah</option>
+                                <option value="viewer">Viewer · hanya membaca</option>
+                              </select>
+                            </label>
+                            <button className="primary" disabled={workspaceBusy}>Tambahkan</button>
+                          </form>
+                        )}
+                        <div className="workspace-members-list">
+                          <strong>Daftar Anggota ({activeMembers.length})</strong>
+                          {loadingMembers ? (
+                            <p className="workspace-loading">Memuat anggota...</p>
+                          ) : !activeMembers.length ? (
+                            <p className="workspace-empty-members">Belum ada anggota lain yang bergabung.</p>
+                          ) : (
+                            activeMembers.map((m) => (
+                              <div key={m.id} className="workspace-member-item">
+                                <div className="member-info">
+                                  <span className="member-icon">👤</span>
+                                  <div>
+                                    <strong>{m.uid === user.uid ? "Anda (Pemilik)" : `User: ${m.memberCode || m.uid.slice(0, 8)}`}</strong>
+                                    <small>{m.role === "owner" ? "Pemilik" : m.role === "editor" ? "Editor" : "Viewer"}{m.joinedAt ? ` · Bergabung ${new Date(m.joinedAt).toLocaleDateString("id-ID")}` : ""}</small>
+                                  </div>
+                                </div>
+                                {m.uid !== user.uid && (
+                                  <button type="button" className="member-remove-btn" onClick={() => removeMember(m.uid)} disabled={workspaceBusy} title="Keluarkan anggota">
+                                    Keluarkan
+                                  </button>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </article>
                 ))}
               </div>

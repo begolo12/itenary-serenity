@@ -393,6 +393,19 @@ export async function inviteUserToWorkspace(ownerUid, workspaceId, rawMemberCode
   return { uid: invitedUser.uid, memberCode, alreadyMember: false };
 }
 
+export function watchWorkspaceMembers(workspaceId, onMembers, onError) {
+  requireCloud();
+  return onSnapshot(collection(db, "workspaces", workspaceId, "members"), (snapshot) => {
+    onMembers(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+  }, onError);
+}
+
+export async function removeWorkspaceMember(workspaceId, memberUid) {
+  requireCloud();
+  await deleteDoc(doc(db, "workspaces", workspaceId, "members", memberUid));
+  await deleteDoc(doc(db, "users", memberUid, "workspaces", workspaceId));
+}
+
 export function watchCloudWorkspaces(uid, onWorkspaces, onError) {
   return onSnapshot(collection(db, "users", uid, "workspaces"), (snapshot) => {
     onWorkspaces(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));

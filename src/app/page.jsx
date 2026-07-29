@@ -154,7 +154,8 @@ export default function Home() {
     localStorage.setItem(ACTIVE_WORKSPACE_KEY, activeWorkspaceId);
     cloudUnsubscribe.current = watchCloudTrips(activeWorkspaceId, (cloudTrips) => {
       const visibleTrips = cloudTrips.filter((t) => !deletedIds.current.has(t.id)).map((trip) => migratePlan(trip));
-      setTrips((current) => visibleTrips.map((cloudTrip) => mergeCloudTrip(current.find((localTrip) => localTrip.id === cloudTrip.id), cloudTrip)));
+      visibleTrips.forEach((trip) => persistedTripSignatures.current.set(trip.id, JSON.stringify(trip)));
+      setTrips(visibleTrips);
       setSelectedId((current) => visibleTrips.some((t) => t.id === current) ? current : visibleTrips[0]?.id || null);
       setWorkspaceTripsReady(true);
       setCloudState(navigator.onLine ? "synced" : "offline");
