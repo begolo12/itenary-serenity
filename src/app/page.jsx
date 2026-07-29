@@ -247,8 +247,9 @@ export default function Home() {
   };
   const openTrip = (id) => { setSelectedId(id); setTab("overview"); setView("detail"); };
   const updateTrip = (update) => {
-    if (readOnly) return;
+    if (readOnly || !selectedId) return;
     const updated = migratePlan({ ...selected, ...update, updatedAt: new Date().toISOString() });
+    persistedTripSignatures.current.set(updated.id, JSON.stringify(updated));
     setTrips((current) => current.map((t) => t.id === selectedId ? updated : t));
     if (cloudReady && user && activeWorkspaceId) {
       saveCloudTrip(activeWorkspaceId, user.uid, updated).catch((err) => setCloudError(cloudMessage(err)));
