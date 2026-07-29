@@ -2076,6 +2076,16 @@ input[inputmode="numeric"] { font-variant-numeric: tabular-nums; }
   background: rgba(230, 126, 34, 0.08);
 }
 
+.workspace-code button.workspace-leave-btn {
+  color: #f0ad4e;
+  border-color: rgba(240, 173, 78, 0.4);
+}
+
+.workspace-code button.workspace-leave-btn:hover {
+  border-color: #f0ad4e;
+  background: rgba(240, 173, 78, 0.1);
+}
+
 .workspace-invite-form {
   display: flex;
   grid-column: 1 / -1;

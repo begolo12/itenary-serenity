@@ -4,7 +4,7 @@ import {
   signInToCloud, signOutFromCloud, signInWithGoogle,
   signInWithCloudAccount, createCloudAccount,
   createWorkspace, joinWorkspaceByCode, inviteUserToWorkspace,
-  deleteWorkspace, resetPersonalWorkspace,
+  deleteWorkspace, leaveWorkspace, resetPersonalWorkspace,
 } from "../../lib/cloud-sync";
 import { cloudMessage, SUPER_ADMIN_EMAIL } from "../../lib/cloud-sync";
 import { getAiProviderStatus, generateWithAi } from "../../lib/ai-client";
@@ -121,7 +121,7 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
   };
   const removeWorkspace = async (workspace) => {
     if (!user) return;
-    if (!window.confirm(`Hapus workspace "${workspace.name}" dari daftar Anda?`)) return;
+    if (!window.confirm(`Hapus workspace "${workspace.name}" secara permanen?`)) return;
     setWorkspaceBusy(true);
     try {
       await deleteWorkspace(user.uid, workspace.id);
@@ -131,6 +131,20 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
       }
       toast(`Workspace "${workspace.name}" telah dihapus.`);
     } catch (error) { toast(error.message || "Gagal menghapus workspace.", "error"); }
+    finally { setWorkspaceBusy(false); }
+  };
+  const exitWorkspace = async (workspace) => {
+    if (!user) return;
+    if (!window.confirm(`Keluar dari workspace "${workspace.name}"?`)) return;
+    setWorkspaceBusy(true);
+    try {
+      await leaveWorkspace(user.uid, workspace.id);
+      if (workspace.id === activeWorkspaceId) {
+        const remaining = workspaces.filter((w) => w.id !== workspace.id);
+        if (remaining.length > 0) switchWorkspace(remaining[0].id);
+      }
+      toast(`Anda telah keluar dari "${workspace.name}".`);
+    } catch (error) { toast(error.message || "Gagal keluar dari workspace.", "error"); }
     finally { setWorkspaceBusy(false); }
   };
   const resetPersonal = async (workspace) => {
@@ -251,8 +265,10 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
                       <button type="button" onClick={() => copyWorkspaceCode(workspace.inviteCode)} disabled={!workspace.inviteCode}>Salin kode</button>
                       {workspace.id === user.uid ? (
                         <button type="button" className="workspace-reset-btn" onClick={() => resetPersonal(workspace)} disabled={workspaceBusy} title="Hapus semua itinerary di workspace pribadi">Reset</button>
-                      ) : (
+                      ) : workspace.role === "owner" ? (
                         <button type="button" className="workspace-delete-btn" onClick={() => removeWorkspace(workspace)} disabled={workspaceBusy} title="Hapus workspace ini">Hapus</button>
+                      ) : (
+                        <button type="button" className="workspace-leave-btn" onClick={() => exitWorkspace(workspace)} disabled={workspaceBusy} title="Keluar dari workspace ini">Keluar</button>
                       )}
                     </div>
                     {workspace.role === "owner" && workspace.id === activeWorkspaceId && <><button type="button" className="workspace-invite" onClick={() => setInviteWorkspaceId(inviteWorkspaceId === workspace.id ? null : workspace.id)}>＋ Tambah user dengan kode</button>{inviteWorkspaceId === workspace.id && <form className="workspace-invite-form" onSubmit={inviteMember}><label>Kode user anggota<input value={inviteMemberCode} onChange={(event) => setInviteMemberCode(event.target.value.replace(/\D/g, "").slice(0, 8))} inputMode="numeric" maxLength={8} placeholder="8 angka" /></label><label>Peran<select value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}><option value="editor">Editor · dapat mengubah</option><option value="viewer">Viewer · hanya membaca</option></select></label><button className="primary" disabled={workspaceBusy}>Tambahkan</button></form>}</>}

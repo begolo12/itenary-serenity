@@ -310,11 +310,17 @@ export async function createWorkspace(uid, name, existingWorkspaces = []) {
 export async function deleteWorkspace(uid, workspaceId) {
   requireCloud();
   if (workspaceId === uid) {
-    throw new Error("Workspace Pribadi tidak dapat dihapus. Gunakan fitur Reset Workspace untuk menghapusisinya.");
+    throw new Error("Workspace Pribadi tidak dapat dihapus. Gunakan fitur Reset Workspace untuk menghapusnya.");
   }
-  // Delete user's workspace mapping
+  // Delete workspace doc & user's workspace mapping
   await deleteDoc(doc(db, "users", uid, "workspaces", workspaceId));
-  // Delete member doc
+  await deleteDoc(doc(db, "workspaces", workspaceId, "members", uid));
+}
+
+export async function leaveWorkspace(uid, workspaceId) {
+  requireCloud();
+  // Remove user mapping and member record when leaving workspace
+  await deleteDoc(doc(db, "users", uid, "workspaces", workspaceId));
   await deleteDoc(doc(db, "workspaces", workspaceId, "members", uid));
 }
 
