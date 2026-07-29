@@ -71,8 +71,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify({ trips, selectedId, view }));
-  }, [hydrated, trips, selectedId, view]);
+    if (hydrated && activeWorkspaceId) {
+      localStorage.setItem(`${STORAGE_KEY}-${activeWorkspaceId}`, JSON.stringify({ trips, selectedId, view }));
+    }
+  }, [hydrated, trips, selectedId, view, activeWorkspaceId]);
 
   useEffect(() => watchAuth(async (currentUser) => {
     cloudUnsubscribe.current?.();
@@ -244,8 +246,30 @@ export default function Home() {
     setActiveWorkspaceId(workspace.id);
   };
   const openTrip = (id) => { setSelectedId(id); setTab("overview"); setView("detail"); };
-  const updateTrip = (update) => { if (readOnly) return; setTrips((current) => current.map((t) => t.id === selectedId ? migratePlan({ ...t, ...update, updatedAt: new Date().toISOString() }) : t)); };
-  const addTrip = (trip) => { if (readOnly) return; const normalized = migratePlan(trip); setTrips((current) => [normalized, ...current]); setSelectedId(normalized.id); setTab("overview"); setView("detail"); };
+  const updateTrip = (update) => {
+    if (readOnly) return;
+    const updated = migratePlan({ ...selected, ...update, updatedAt: new Date().toISOString() });
+    setTrips((current) => current.map((t) => t.id === selectedId ? updated : t));
+    if (cloudReady && user && activeWorkspaceId) {
+      saveCloudTrip(activeWorkspaceId, user.uid, updated).catch((err) => setCloudError(cloudMessage(err)));
+    }
+  };
+  const addTrip = async (trip) => {
+    if (readOnly) return;
+    const normalized = migratePlan(trip);
+    setTrips((current) => [normalized, ...current]);
+    setSelectedId(normalized.id);
+    setTab("overview");
+    setView("detail");
+    if (cloudReady && user && activeWorkspaceId) {
+      try {
+        await saveCloudTrip(activeWorkspaceId, user.uid, normalized);
+        persistedTripSignatures.current.set(normalized.id, JSON.stringify(normalized));
+      } catch (err) {
+        setCloudError(cloudMessage(err));
+      }
+    }
+  };
   const removeTrip = async (trip) => {
     if (readOnly) return;
     if (!window.confirm(`Hapus "${trip.title}"? Tindakan ini tidak dapat dibatalkan.`)) return;

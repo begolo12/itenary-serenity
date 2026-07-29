@@ -6,8 +6,8 @@ import {
   createWorkspace, joinWorkspaceByCode, inviteUserToWorkspace,
   deleteWorkspace, leaveWorkspace, resetPersonalWorkspace,
   watchWorkspaceMembers, removeWorkspaceMember,
+  cloudMessage, SUPER_ADMIN_EMAIL,
 } from "../../lib/cloud-sync";
-import { cloudMessage, SUPER_ADMIN_EMAIL } from "../../lib/cloud-sync";
 import { getAiProviderStatus, generateWithAi } from "../../lib/ai-client";
 import { CURRENCY_KEY, CURRENCY_LIST } from "../../lib/trips";
 import { syncLabel } from "../layout/Sidebar";
