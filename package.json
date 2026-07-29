@@ -20,6 +20,9 @@
   "keywords": [],
   "author": "",
   "license": "UNLICENSED",
+  "engines": {
+    "node": "20.x"
+  },
   "type": "module",
   "dependencies": {
     "firebase": "^12.16.0",
