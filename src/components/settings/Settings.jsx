@@ -71,6 +71,7 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
     } catch {} finally { setLoadingPending(false); }
   }, [isSuperAdmin, user]);
   useEffect(() => { if (isSuperAdmin) fetchPending(); }, [isSuperAdmin, fetchPending]);
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) || workspaces[0];
   const isOwner = activeWorkspace?.role === "owner";
   useEffect(() => {
     if (!activeWorkspaceId || !isOwner) {
@@ -136,7 +137,6 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
       setTesting(false);
     }
   };
-  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) || workspaces[0];
   const createNewWorkspace = async (event) => {
     event.preventDefault();
     const name = workspaceName.trim();
