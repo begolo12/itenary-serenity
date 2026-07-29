@@ -1,4 +1,4 @@
-const CACHE = "serenity-v3";
+const CACHE = "serenity-v4";
 const FILES = ["/", "/manifest.json", "/icon-192.svg", "/icon-512.svg"];
 
 self.addEventListener("install", (event) => {
