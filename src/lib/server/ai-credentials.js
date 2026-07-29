@@ -7,11 +7,26 @@ const PROVIDER_ENV = {
   gemini: "SERENITY_GEMINI_API_KEY",
 };
 
-const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
-const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, "\n");
-const credential = clientEmail && privateKey ? cert({ projectId, clientEmail, privateKey }) : undefined;
-const adminApp = getApps()[0] || initializeApp(credential ? { credential, projectId } : projectId ? { projectId } : undefined);
+function getAdminApp() {
+  if (getApps().length > 0) {
+    return getApps()[0];
+  }
+  const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+  let privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
+  if (privateKey) {
+    privateKey = privateKey.trim().replace(/^["']|["']$/g, "").replace(/\\n/g, "\n");
+  }
+  let credential;
+  if (clientEmail && privateKey) {
+    try {
+      credential = cert({ projectId, clientEmail, privateKey });
+    } catch (err) {
+      console.error("Firebase admin credential error:", err);
+    }
+  }
+  return initializeApp(credential ? { credential, projectId } : projectId ? { projectId } : undefined);
+}
 
 export function supportedProvider(provider) {
   return Object.hasOwn(PROVIDER_ENV, provider);
@@ -36,7 +51,7 @@ export async function requireAiUser(request, workspaceId = "") {
   }
   let decoded;
   try {
-    decoded = await getAuth(adminApp).verifyIdToken(token);
+    decoded = await getAuth(getAdminApp()).verifyIdToken(token);
   } catch {
     const error = new Error("Sesi login tidak valid. Muat ulang halaman dan coba lagi.");
     error.status = 401;
@@ -48,7 +63,7 @@ export async function requireAiUser(request, workspaceId = "") {
     throw error;
   }
   if (workspaceId) {
-    const member = await getFirestore(adminApp).doc(`workspaces/${workspaceId}/members/${decoded.uid}`).get();
+    const member = await getFirestore(getAdminApp()).doc(`workspaces/${workspaceId}/members/${decoded.uid}`).get();
     if (!member.exists || !["owner", "editor"].includes(member.data()?.role)) {
       const error = new Error("Anda tidak memiliki izin membuat generasi AI di workspace ini.");
       error.status = 403;
@@ -59,10 +74,10 @@ export async function requireAiUser(request, workspaceId = "") {
 }
 
 export async function consumeAiRateLimit(uid, workspaceId) {
-  const ref = getFirestore(adminApp).doc(`workspaces/${workspaceId}/aiRateLimits/${uid}`);
+  const ref = getFirestore(getAdminApp()).doc(`workspaces/${workspaceId}/aiRateLimits/${uid}`);
   const now = Date.now();
   let allowed = true;
-  await getFirestore(adminApp).runTransaction(async (transaction) => {
+  await getFirestore(getAdminApp()).runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
     const data = snapshot.exists ? snapshot.data() : {};
     const windowStartedAt = Number(data.windowStartedAt) || now;

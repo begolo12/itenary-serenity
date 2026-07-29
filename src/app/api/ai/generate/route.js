@@ -87,10 +87,13 @@ function sanitizeBrief(brief) {
   });
 }
 
-function normalize(data, brief, providerKeyName, model) {
+function normalize(data, brief, providerKeyName, model, isTest = false) {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error(`AI mengembalikan struktur yang tidak valid: ${JSON.stringify(Object.keys(data || {}))}`);
   const root = data.itinerary || data.data || data.trip || data.response || data.result || data;
-  if (!Array.isArray(root.activities) || !Array.isArray(root.tasks) || !Array.isArray(root.expenses)) throw new Error(`AI mengembalikan struktur yang tidak valid: kunci "${Object.keys(root).join('", "')}" tidak memiliki activities/tasks/expenses sebagai array.`);
+  const rawActivities = Array.isArray(root.activities) ? root.activities : isTest ? [] : null;
+  const rawTasks = Array.isArray(root.tasks) ? root.tasks : isTest ? [] : null;
+  const rawExpenses = Array.isArray(root.expenses) ? root.expenses : isTest ? [] : null;
+  if (rawActivities === null || rawTasks === null || rawExpenses === null) throw new Error(`AI mengembalikan struktur yang tidak valid: kunci "${Object.keys(root).join('", "')}" tidak memiliki activities/tasks/expenses sebagai array.`);
   const destination = cleanText(root.destination, 240) || brief.destination || brief.venue || brief.locations[0]?.name;
   if (!destination) throw new Error("AI belum mengembalikan destinasi atau venue.");
   const fallbackHighlights = String(brief.interests || "").split(",").map((item) => item.trim()).filter(Boolean).slice(0, 10);
@@ -103,7 +106,7 @@ function normalize(data, brief, providerKeyName, model) {
   const conflicts = metadataList(root.conflicts);
   const alternatives = metadataList(root.alternatives);
   const guideText = (key, fallback) => cleanText(guide[key], 500) || fallback;
-  const activities = root.activities.slice(0, 120).map((item) => ({
+  const activities = rawActivities.slice(0, 120).map((item) => ({
     id: cleanText(item?.id, 80) || crypto.randomUUID(),
     day: cleanText(item?.day, 40) || "Hari 1",
     time: cleanText(item?.time, 10) || "09:00",
@@ -125,7 +128,7 @@ function normalize(data, brief, providerKeyName, model) {
     assigneeId: cleanText(item?.assigneeId, 120),
     dependencies: Array.isArray(item?.dependencies) ? item.dependencies.map((dependency) => cleanText(dependency, 80)).filter(Boolean).slice(0, 100) : [],
   })).filter((item) => item.title);
-  const tasks = root.tasks.slice(0, 160).map((item) => ({
+  const tasks = rawTasks.slice(0, 160).map((item) => ({
     id: cleanText(item?.id, 80) || crypto.randomUUID(),
     title: cleanText(item?.title, 250),
     category: cleanText(item?.category, 100) || "Umum",
@@ -139,7 +142,7 @@ function normalize(data, brief, providerKeyName, model) {
     assigneeId: cleanText(item?.assigneeId, 120),
     dependencies: Array.isArray(item?.dependencies) ? item.dependencies.map((dependency) => cleanText(dependency, 80)).filter(Boolean).slice(0, 100) : [],
   })).filter((item) => item.title);
-  const expenses = root.expenses.slice(0, 100).map((item) => ({
+  const expenses = rawExpenses.slice(0, 100).map((item) => ({
     id: cleanText(item?.id, 80) || crypto.randomUUID(),
     category: cleanText(item?.category, 200),
     description: cleanText(item?.description, 300),
@@ -173,7 +176,7 @@ function normalize(data, brief, providerKeyName, model) {
     status: ["open", "mitigated", "accepted"].includes(item?.status) ? item.status : "open",
     locked: Boolean(item?.locked),
   })).filter((item) => item.title);
-  if (!activities.length || !tasks.length) throw new Error("Hasil AI tidak cukup lengkap.");
+  if (!isTest && (!activities.length || !tasks.length)) throw new Error("Hasil AI tidak cukup lengkap.");
   return {
     title: cleanText(root.title, 180) || `${brief.purpose || "Rencana"} ${brief.planType === "trip" ? `di ${destination}` : `· ${brief.venue || destination}`}`,
     summary: cleanText(root.summary, 1000) || `${brief.planType === "trip" ? "Rencana perjalanan" : "Rencana kegiatan"} ${brief.purpose || "kegiatan"} ${brief.planType === "trip" ? `dari ${brief.origin || "kota asal"} ke ${destination}` : `di ${brief.venue || destination}`}.`,
@@ -301,7 +304,7 @@ ATURAN:
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: system }] },
             contents: [{ role: "user", parts: [{ text: prompt }] }],
-             generationConfig: { temperature: test ? 0 : 0.4, maxOutputTokens: test ? 150 : 8000, responseMimeType: "application/json" },
+             generationConfig: { temperature: test ? 0 : 0.4, maxOutputTokens: test ? 1500 : 8000, responseMimeType: "application/json" },
              ...(brief.recommendDestination ? { tools: [{ google_search: {} }] } : {}),
           }),
         });
@@ -311,7 +314,7 @@ ATURAN:
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
           signal: controller.signal,
           body: JSON.stringify({
-            model: provider.model, temperature: test ? 0 : 0.4, max_tokens: test ? 150 : 8000,
+            model: provider.model, temperature: test ? 0 : 0.4, max_tokens: test ? 1500 : 8000,
             response_format: { type: "json_object" },
             messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
           }),
@@ -333,7 +336,7 @@ ATURAN:
     } catch {
       throw new SyntaxError(`AI tidak mengembalikan JSON valid. Respons: ${content.slice(0, 500)}`);
     }
-    const result = normalize(parsed, brief, providerKeyName, provider.model);
+    const result = normalize(parsed, brief, providerKeyName, provider.model, test);
     return NextResponse.json(test ? { ok: true, provider: providerKeyName, model: provider.model } : { ...result, ...(brief.recommendDestination ? { recommendationSource: "Gemini Google Search" } : {}), provider: providerKeyName, model: provider.model });
   } catch (error) {
     const message = error?.name === "AbortError" ? "Provider AI melewati batas waktu 25 detik." : error.message || "Permintaan AI gagal.";

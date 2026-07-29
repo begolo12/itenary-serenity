@@ -123,9 +123,28 @@ export async function bootstrapWorkspace(user) {
   }
   if (existingUserData.status === "approved") {
     const wsRef = doc(db, "workspaces", user.uid);
+    const memberRef = doc(db, "workspaces", user.uid, "members", user.uid);
+    const userWsRef = doc(db, "users", user.uid, "workspaces", user.uid);
+    // Ensure workspace and member documents exist client-side so security rules succeed
+    await withRetry(() => setDoc(wsRef, {
+      name: "Workspace Pribadi", createdBy: user.uid, updatedAt: now,
+    }, { merge: true }));
+    await withRetry(() => setDoc(memberRef, {
+      uid: user.uid, role: "owner", joinedAt: now,
+    }, { merge: true }));
     const wsSnap = await withRetry(() => getDoc(wsRef));
     const wsData = wsSnap.exists() ? wsSnap.data() : {};
-    return { id: user.uid, name: wsData.name || "Workspace Pribadi", role: "owner", inviteCode: wsData.inviteCode || "", memberCode: existingUserData.memberCode || "" };
+    const inviteCode = wsData.inviteCode || await uniqueWorkspaceCode();
+    if (!wsData.inviteCode) {
+      await withRetry(() => setDoc(wsRef, { inviteCode }, { merge: true }));
+      await withRetry(() => setDoc(doc(db, "inviteCodes", inviteCode), {
+        workspaceId: user.uid, workspaceName: wsData.name || "Workspace Pribadi", ownerUid: user.uid, code: inviteCode, updatedAt: now,
+      }, { merge: true }));
+    }
+    await withRetry(() => setDoc(userWsRef, {
+      workspaceId: user.uid, name: wsData.name || "Workspace Pribadi", role: "owner", inviteCode, joinedAt: now, updatedAt: now,
+    }, { merge: true }));
+    return { id: user.uid, name: wsData.name || "Workspace Pribadi", role: "owner", inviteCode, memberCode: existingUserData.memberCode || "" };
   }
   await withRetry(() => setDoc(userRef, {
     uid: user.uid,
