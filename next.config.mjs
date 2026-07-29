@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalModules: ["firebase-admin"],
+  serverExternalPackages: ["firebase-admin"],
 };
 
 export default nextConfig;
