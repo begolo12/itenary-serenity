@@ -67,7 +67,7 @@ function isTransient(error) {
   return ["unavailable", "deadline-exceeded", "aborted", "internal", "resource-exhausted"].includes(cloudErrorCode(error));
 }
 
-async function withRetry(operation, attempts = 2) {
+export async function withRetry(operation, attempts = 2) {
   let lastError;
   for (let attempt = 0; attempt <= attempts; attempt += 1) {
     try {
@@ -159,8 +159,6 @@ export async function bootstrapWorkspace(user) {
   return { pending: true, user: { uid: user.uid, email: user.email } };
 }
 
-
-export { withRetry };
 export { enqueueCloudTrip, offlineQueueSize };
 
 export async function flushCloudQueue(workspaceId, uid) {
