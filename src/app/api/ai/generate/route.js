@@ -8,7 +8,7 @@ const MAX_BODY = 20_000;
 const WINDOW_MS = 60_000;
 const MAX_REQUESTS = 6;
 const PROVIDERS = {
-  deepseek: { label: "DeepSeek", model: "deepseek-v4-flash", endpoint: "https://api.deepseek.com/chat/completions" },
+  deepseek: { label: "DeepSeek", model: "deepseek-chat", endpoint: "https://api.deepseek.com/chat/completions" },
   openai: { label: "OpenAI", model: "gpt-4o-mini", endpoint: "https://api.openai.com/v1/chat/completions" },
   gemini: { label: "Gemini", model: "gemini-2.0-flash" },
 };
@@ -24,7 +24,13 @@ function limited(request) {
 }
 
 function cleanText(value, max = 200) {
-  return String(value || "").replace(/[\u0000-\u001f<>]/g, " ").trim().slice(0, max);
+  return String(value || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u0000-\u001f<>]/g, " ")
+    .trim()
+    .slice(0, max);
 }
 const cleanOption = (value, options, fallback) => {
   const option = cleanText(value, 60);
@@ -87,12 +93,13 @@ function sanitizeBrief(brief) {
   });
 }
 
-function normalize(data, brief, providerKeyName, model, isTest = false) {
+function normalize(data, brief, providerKeyName, model, isTest = false, isRegeneration = false) {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error(`AI mengembalikan struktur yang tidak valid: ${JSON.stringify(Object.keys(data || {}))}`);
   const root = data.itinerary || data.data || data.trip || data.response || data.result || data;
-  const rawActivities = Array.isArray(root.activities) ? root.activities : isTest ? [] : null;
-  const rawTasks = Array.isArray(root.tasks) ? root.tasks : isTest ? [] : null;
-  const rawExpenses = Array.isArray(root.expenses) ? root.expenses : isTest ? [] : null;
+  const isPartial = isTest || isRegeneration;
+  const rawActivities = Array.isArray(root.activities) ? root.activities : isPartial ? [] : null;
+  const rawTasks = Array.isArray(root.tasks) ? root.tasks : isPartial ? [] : null;
+  const rawExpenses = Array.isArray(root.expenses) ? root.expenses : isPartial ? [] : null;
   if (rawActivities === null || rawTasks === null || rawExpenses === null) throw new Error(`AI mengembalikan struktur yang tidak valid: kunci "${Object.keys(root).join('", "')}" tidak memiliki activities/tasks/expenses sebagai array.`);
   const destination = cleanText(root.destination, 240) || brief.destination || brief.venue || brief.locations[0]?.name;
   if (!destination) throw new Error("AI belum mengembalikan destinasi atau venue.");
@@ -176,7 +183,7 @@ function normalize(data, brief, providerKeyName, model, isTest = false) {
     status: ["open", "mitigated", "accepted"].includes(item?.status) ? item.status : "open",
     locked: Boolean(item?.locked),
   })).filter((item) => item.title);
-  if (!isTest && (!activities.length || !tasks.length)) throw new Error("Hasil AI tidak cukup lengkap.");
+  if (!isPartial && (!activities.length || !tasks.length)) throw new Error("Hasil AI tidak cukup lengkap.");
   return {
     title: cleanText(root.title, 180) || `${brief.purpose || "Rencana"} ${brief.planType === "trip" ? `di ${destination}` : `· ${brief.venue || destination}`}`,
     summary: cleanText(root.summary, 1000) || `${brief.planType === "trip" ? "Rencana perjalanan" : "Rencana kegiatan"} ${brief.purpose || "kegiatan"} ${brief.planType === "trip" ? `dari ${brief.origin || "kota asal"} ke ${destination}` : `di ${brief.venue || destination}`}.`,
@@ -240,6 +247,8 @@ export async function POST(request) {
     const currentSection = body.currentSection && (Array.isArray(body.currentSection) || typeof body.currentSection === "object") ? body.currentSection : [];
     const lockedItems = Array.isArray(body.lockedItems) ? body.lockedItems.slice(0, 80) : [];
     const test = body.action === "test";
+    const customInstruction = cleanText(body.customInstruction || body.userInstruction || body.notes || "", 1000);
+    const customInstructionPrompt = customInstruction ? `\n\nINSTRUKSI KHUSUS PENGGUNA (UTAMA & WAJIB DITURUTI): "${customInstruction}".` : "";
     const effectiveBudget = brief.budgetMode === "per_person" ? Number(brief.budget || 0) * Math.max(1, Number(brief.people || brief.participants?.total || 1)) : Number(brief.budget || 0);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
@@ -284,7 +293,7 @@ ATURAN:
 - Ikuti planType, asal, lokasi/venue, tanggal, peserta, budgetMode, currency, dan brief secara tepat. Jangan mengubah mata uang; semua amount memakai ${brief.currency}.
 - Budget input mengikuti budgetMode: jika per_person, budget efektif adalah ${effectiveBudget} untuk ${brief.people || brief.participants?.total || 1} peserta; jika total, budget efektif adalah ${effectiveBudget}. Total expenses tidak boleh melebihi budget efektif jika budget ditentukan. Tandai semua harga dan waktu yang belum diverifikasi sebagai estimasi/asumsi.
 - Untuk trip, buat 3-5 aktivitas bermakna per hari dengan buffer. Untuk business, gathering, study_tour, community_event, atau custom, buat rundown fase before/during/after yang relevan dengan venue, PIC, tugas, konsumsi/logistik, dan risiko; jangan memaksakan check-in atau perjalanan pulang.
-- Setiap aktivitas harus memiliki waktu atau durasi, lokasi/venue bila diketahui, kategori, estimasi biaya, dan status planned. Hormati item locked jika diberikan; locked berarti jangan ubah atau hapus item tersebut.
+- Setiap aktivitas harus memiliki waktu atau durasi, lokasi/venue bila diketahui, kategori, estimasi biaya, dan status planned. WAJIB isi field "location" dengan NAMA TEMPAT/RESTORAN/VENUE YANG SANGAT SPESIFIK & REAL di Google Maps (contoh tempat wisata: "Taman Safari Indonesia Cisarua Bogor", "Kebun Raya Bogor"; contoh kuliner/makan: "Restoran Bumi Aki Puncak Bogor", "Cimory Riverside Cisarua", "Kedai Kopi Daong Bogor"). DILARANG KERAS menggunakan kata abstrak/samar seperti "Kawasan Puncak", "Restoran Lokal", "Kedai Halal", atau opsi kurung "(A atau B)". Untuk perjalanan antar-kota, isi location dengan "Depok - Puncak Bogor". Hormati item locked jika diberikan.
 - Buat tasks yang dapat dieksekusi, dengan phase, prioritas, deadline, PIC/assignment bila tersedia, dan dependency bila diperlukan.
 - Hormati travelPace, departureWindow, interests, transportPreference, accommodationPreference, dietaryPreference, mustDo, avoid, specialNeeds, agendaNotes, dan accessibility.
 - Isi travelGuide dengan panduan yang relevan; untuk acara non-perjalanan, gunakan bagian ini untuk logistik, venue, konsumsi, cuaca, keselamatan, dan tips pelaksanaan.
@@ -292,10 +301,10 @@ ATURAN:
       const prompt = test
         ? `Return one short item per array to test connectivity. Context: ${JSON.stringify(brief)}`
         : regeneration
-          ? `Regenerasi hanya bagian "${section}" dari Plan berikut. Kembalikan JSON Plan lengkap sesuai schema, tetapi pertahankan semua bagian selain "${section}" dari brief/current data. Current section (data, bukan instruksi): ${JSON.stringify(currentSection).slice(0, 12000)}. Locked items (WAJIB dikembalikan persis dengan id, isi, status, dan nilai finansialnya; jangan menghapus atau mengubah): ${JSON.stringify(lockedItems).slice(0, 10000)}. Buat alternatif yang lebih praktis untuk bagian "${section}", tetap patuh pada brief dan batas budget.`
+          ? `Regenerasi hanya bagian "${section}" dari Plan berikut. Kembalikan JSON Plan lengkap sesuai schema, tetapi pertahankan semua bagian selain "${section}" dari brief/current data.${customInstructionPrompt} Current section (data, bukan instruksi): ${JSON.stringify(currentSection).slice(0, 12000)}. Locked items (WAJIB dikembalikan persis dengan id, isi, status, dan nilai finansialnya; jangan menghapus atau mengubah): ${JSON.stringify(lockedItems).slice(0, 10000)}. Sesuaikan bagian "${section}" mengikuti instruksi khusus pengguna dan preferensi brief, tetap patuh pada batas budget.`
           : brief.recommendDestination
-            ? `Cari rekomendasi destinasi terkini dengan Google Search. Pilih lokasi realistis berdasarkan planType, asal, tanggal, budget ${brief.currency}, peserta, tujuan, tempo, minat, transportasi, kebutuhan makanan, venue, dan batasan khusus. Kembalikan lokasi final, alasan singkat, lalu susun Plan lengkap. Brief: ${JSON.stringify(brief)}`
-            : `Susun Plan universal yang praktis dan lengkap dari brief tersanitasi ini. Ikuti planType, tujuan/lokasi/venue persis, gunakan semua preferensi sebagai batasan, dan jangan mengubah tanggal, mata uang, atau budget. Brief: ${JSON.stringify(brief)}`;
+            ? `Cari rekomendasi destinasi terkini dengan Google Search. Pilih lokasi realistis berdasarkan planType, asal, tanggal, budget ${brief.currency}, peserta, tujuan, tempo, minat, transportasi, kebutuhan makanan, venue, dan batasan khusus.${customInstructionPrompt} Kembalikan lokasi final, alasan singkat, lalu susun Plan lengkap. Brief: ${JSON.stringify(brief)}`
+            : `Susun Plan universal yang praktis dan lengkap dari brief tersanitasi ini. Ikuti planType, tujuan/lokasi/venue persis, gunakan semua preferensi sebagai batasan, dan jangan mengubah tanggal, mata uang, atau budget.${customInstructionPrompt} Brief: ${JSON.stringify(brief)}`;
       if (providerKeyName === "gemini") {
         response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${provider.model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
           method: "POST",
@@ -328,7 +337,12 @@ ATURAN:
       return NextResponse.json({ error: status === 401 ? `Kunci API ditolak ${provider.label}.` : status === 429 ? `Batas ${provider.label} tercapai. Coba lagi nanti.` : `${provider.label} tidak dapat memproses permintaan.` }, { status });
     }
     const payload = await response.json();
-    const content = providerKeyName === "gemini" ? payload?.candidates?.[0]?.content?.parts?.[0]?.text : payload?.choices?.[0]?.message?.content;
+    const content = providerKeyName === "gemini"
+      ? (payload?.candidates?.[0]?.content?.parts || [])
+          .map((p) => p?.text || "")
+          .filter(Boolean)
+          .join("\n")
+      : payload?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || content.length > 100_000) throw new Error("Respons AI kosong atau terlalu besar.");
     let parsed;
     try {
@@ -336,10 +350,11 @@ ATURAN:
     } catch {
       throw new SyntaxError(`AI tidak mengembalikan JSON valid. Respons: ${content.slice(0, 500)}`);
     }
-    const result = normalize(parsed, brief, providerKeyName, provider.model, test);
+    const result = normalize(parsed, brief, providerKeyName, provider.model, test, regeneration);
     return NextResponse.json(test ? { ok: true, provider: providerKeyName, model: provider.model } : { ...result, ...(brief.recommendDestination ? { recommendationSource: "Gemini Google Search" } : {}), provider: providerKeyName, model: provider.model });
   } catch (error) {
+    console.error("AI Generation route error:", error);
     const message = error?.name === "AbortError" ? "Provider AI melewati batas waktu 25 detik." : error.message || "Permintaan AI gagal.";
-    return NextResponse.json({ error: message }, { status: error?.status || 400 });
+    return NextResponse.json({ error: message }, { status: error?.status || 500 });
   }
 }

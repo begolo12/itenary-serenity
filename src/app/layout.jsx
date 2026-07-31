@@ -1,4 +1,4 @@
-import { Manrope, Newsreader } from "next/font/google";
+import { Manrope, Newsreader, Inter, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 
 const manrope = Manrope({
@@ -13,6 +13,18 @@ const newsreader = Newsreader({
   display: "swap",
 });
 
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-plus-jakarta-sans",
+  display: "swap",
+});
+
 export const metadata = {
   title: "Serenity Itinerary",
   description: "Rencana perjalanan yang rapi, tenang, dan selalu dapat diedit.",
@@ -21,7 +33,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="id" className={`${manrope.variable} ${newsreader.variable}`}>
+    <html lang="id" data-scroll-behavior="smooth" className={`${manrope.variable} ${newsreader.variable} ${inter.variable} ${plusJakartaSans.variable}`}>
       <head>
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#0e3b33" />

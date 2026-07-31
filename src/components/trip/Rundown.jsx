@@ -2,7 +2,7 @@
 import { useRef, useState } from 'react';
 import { PanelHead } from '../common/PanelHead';
 import { compressPhotoForFirestore } from '../../lib/image-compression';
-import { downloadIcs, rupiah, safeUUID } from '../../lib/trips';
+import { downloadIcs, rupiah, safeUUID, buildGoogleMapsRouteUrl, buildGoogleMapsSearchUrl } from '../../lib/trips';
 
 const parseTime = (value) => {
   const match = String(value || '').match(/(\d{1,2}):(\d{2})/);
@@ -72,9 +72,41 @@ export function Rundown({ trip, setModal, removeItem, updateTrip, toggleLock, to
     return { label: 'Mendatang', cls: 'upcoming' };
   };
 
+  const overallRouteUrl = buildGoogleMapsRouteUrl(trip);
+  const uniqueDays = [...new Set(activities.map((a) => a.day || 'Hari 1'))];
+
   return <section className="panel">
     <PanelHead eyebrow="ALUR PERJALANAN" title={`${activities.length} aktivitas`} action={readOnly ? null : "＋ Tambah aktivitas"} onAction={readOnly ? undefined : () => setModal?.({ type: 'activity', item: null })} />
-    <div className="export-row"><button className="quiet" onClick={() => downloadIcs(trip)}>Ekspor kalender .ics</button></div>
+    <div className="export-row gmaps-row">
+      <button className="quiet" onClick={() => downloadIcs(trip)}>Ekspor kalender .ics</button>
+      {overallRouteUrl && (
+        <a
+          href={overallRouteUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="gmaps-route-btn"
+          title="Buka rute bernavigasi lengkap di Google Maps (Mobil)"
+        >
+          🗺️ Rute Google Maps (Mobil)
+        </a>
+      )}
+      {uniqueDays.length > 1 && uniqueDays.map((d) => {
+        const dayUrl = buildGoogleMapsRouteUrl(trip, d);
+        if (!dayUrl) return null;
+        return (
+          <a
+            key={d}
+            href={dayUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="gmaps-route-btn sub-day"
+            title={`Buka Rute Google Maps untuk ${d}`}
+          >
+            📍 Rute {d}
+          </a>
+        );
+      })}
+    </div>
     {activities.length > 0 && <div className="progress-bar"><div className="progress-fill" style={{ width: `${progress}%` }} /><span>{doneActivities}/{activities.length} selesai ({progress}%)</span></div>}
     {conflicts.length > 0 && <div className="schedule-conflict" role="alert"><strong>Konflik jadwal terdeteksi</strong><span>{conflicts.slice(0, 3).join(" · ")}</span>{conflicts.length > 3 && <small>+{conflicts.length - 3} konflik lainnya</small>}</div>}
     {!activities.length ? <p className="panel-empty">Belum ada aktivitas.</p> : <div className="timeline">{activities.map((item) => {
@@ -87,7 +119,23 @@ export function Rundown({ trip, setModal, removeItem, updateTrip, toggleLock, to
         <div className="timeline-card card">
           <div className="activity-kicker"><span>{item.category || 'Aktivitas'}</span>{item.estimatedCost > 0 && <b>{rupiah(item.estimatedCost, trip.currency)}</b>}</div>
           <h3>{item.title}</h3>
-          <div className="activity-meta"><span>⌖ {item.location || 'Lokasi belum diisi'}</span><span>◷ {item.duration || 'Durasi belum diisi'}</span><span>↗ {item.transport || 'Transportasi fleksibel'}</span></div>
+          <div className="activity-meta">
+            {item.location ? (
+              <a
+                href={buildGoogleMapsSearchUrl(item.location, item.title, trip)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="location-link"
+                title="Buka lokasi/rute di Google Maps"
+              >
+                ⌖ {item.location} ↗
+              </a>
+            ) : (
+              <span>⌖ Lokasi belum diisi</span>
+            )}
+            <span>◷ {item.duration || 'Durasi belum diisi'}</span>
+            <span>↗ {item.transport || 'Transportasi fleksibel'}</span>
+          </div>
           <p>{item.note || 'Tanpa catatan'}</p>
           {item.bookingNote && <div className="booking-note"><b>Booking / verifikasi</b><span>{item.bookingNote}</span></div>}
           {photos.length > 0 && <div className="activity-photos"><img src={photos[0].photoData} alt={`Foto ${item.title}`} className="photo-thumb" onClick={() => setExpandedPhotos((prev) => ({ ...prev, [item.id]: !prev[item.id] }))} />{photos.length > 1 && <span className="photo-count" onClick={() => setExpandedPhotos((prev) => ({ ...prev, [item.id]: !prev[item.id] }))}>+{photos.length - 1}</span>}{isExpanded && <div className="photo-gallery">{photos.map((photo) => <img key={photo.id} src={photo.photoData} alt="Foto aktivitas" />)}<button className="quiet" onClick={() => setExpandedPhotos((prev) => ({ ...prev, [item.id]: false }))}>Tutup galeri</button></div>}</div>}

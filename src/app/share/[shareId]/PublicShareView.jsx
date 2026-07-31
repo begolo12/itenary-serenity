@@ -16,7 +16,7 @@ export default function PublicShareView({ shareId }) {
   if (error) {
     return (
       <main className="ps-container">
-        <div className="ps-card ps-error-card">
+        <div className="ps-error-card">
           <div className="ps-brand-tag">SERENITY ATLAS</div>
           <h1>Tautan Tidak Tersedia</h1>
           <p>{error}</p>
@@ -28,7 +28,7 @@ export default function PublicShareView({ shareId }) {
   if (!share) {
     return (
       <main className="ps-container">
-        <div className="ps-card ps-loading-card">
+        <div className="ps-loading-card">
           <div className="ps-brand-tag">SERENITY ATLAS</div>
           <h1>Memuat Rencana Perjalanan...</h1>
           <div className="ps-skeleton-bar" />

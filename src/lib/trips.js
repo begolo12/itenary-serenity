@@ -243,3 +243,114 @@ export function downloadIcs(trip) {
   });
   download(`${trip.destination || "serenity"}.ics`, ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Serenity Itinerary//ID", ...events, "END:VCALENDAR"].join("\r\n"), "text/calendar;charset=utf-8");
 }
+
+export function resolveGmapsDestination(place, tripDest = "") {
+  if (!place || typeof place !== "string") return tripDest ? resolveGmapsDestination(tripDest) : "";
+  let loc = place.trim();
+  
+  const parenMatch = loc.match(/^([^()]+)\(([^()]+)\)$/);
+  if (parenMatch) {
+    const mainPart = parenMatch[1].trim();
+    const subPart = parenMatch[2].trim();
+    if (/^(?:Kawasan|Area|Sekitar|Lokasi|Restoran|Resto|Kedai)\b/i.test(mainPart)) {
+      const firstOption = subPart.split(/[/|]|\batau\b/i)[0].replace(/^(?:sekitar|dekat|area)\s+/i, "").trim();
+      const region = mainPart.replace(/^(?:Kawasan|Area|Sekitar|Lokasi)\s+/i, "").trim();
+      loc = `${firstOption}, ${region}`;
+    } else {
+      const firstOption = subPart.split(/[/|]|\batau\b/i)[0].replace(/^(?:sekitar|dekat|area)\s+/i, "").trim();
+      loc = `${mainPart} ${firstOption}`;
+    }
+  }
+  loc = loc.split(/[/]|\batau\b/i)[0].trim();
+  loc = loc.replace(/^(?:sekitar|area|kawasan|dekat|di|Rute)\s+/i, "").trim();
+
+  // Disambiguate "Puncak" -> "Tugu Puncak Pass, Cisarua, Bogor" for exact landmark routing
+  if (/^puncak(?:\s*bogor)?$/i.test(loc) || loc.toLowerCase() === "puncak") {
+    return "Tugu Puncak Pass, Cisarua, Bogor";
+  }
+  if (loc.toLowerCase().includes("puncak") && !loc.toLowerCase().includes("bogor") && !loc.toLowerCase().includes("cisarua")) {
+    loc = loc.replace(/\bpuncak\b/gi, "Tugu Puncak Pass, Cisarua, Bogor");
+  }
+
+  return loc;
+}
+
+export function cleanLocationName(location) {
+  return resolveGmapsDestination(location);
+}
+
+export function buildGoogleMapsSearchUrl(location, title = "", trip = null) {
+  const rawLoc = String(location || "").trim();
+  const rawTitle = String(title || "").trim();
+  const tripOrigin = trip?.origin || "Depok";
+  const tripDest = trip?.destination || "Puncak, Bogor";
+
+  const isRoute = /rute|perjalanan|driv|transit|transport|ke puncak|ke destinasi/i.test(rawLoc)
+    || /perjalanan|rute|otw|berangkat/i.test(rawTitle)
+    || /[-–—>]/i.test(rawLoc);
+
+  if (isRoute) {
+    let origin = tripOrigin;
+    let destination = resolveGmapsDestination(tripDest);
+
+    const match = rawLoc.match(/([^-–—>]+?)\s*[-–—>|ke]\s*(.+)/i)
+      || rawTitle.match(/(?:dari|ke)\s+([^-–—>]+?)\s*(?:ke|-)\s*(.+)/i);
+
+    if (match) {
+      const p1 = match[1].replace(/^(?:Rute|Perjalanan|dari)\s+/i, "").trim();
+      const p2 = match[2].replace(/\s+\(.*\)/g, "").trim();
+      if (p1) origin = p1;
+      if (p2) destination = resolveGmapsDestination(p2, tripDest);
+    }
+
+    const mode = trip?.transportPreference === "walking" ? "walking"
+      : trip?.transportPreference === "public" ? "transit"
+      : "driving";
+
+    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=${mode}`;
+  }
+
+  let resolved = resolveGmapsDestination(rawLoc, tripDest);
+  if (tripDest && !resolved.toLowerCase().includes("bogor") && !resolved.toLowerCase().includes("jakarta") && !resolved.toLowerCase().includes("cisarua")) {
+    resolved = `${resolved}, ${resolveGmapsDestination(tripDest)}`;
+  }
+
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(resolved)}`;
+}
+
+export function buildGoogleMapsRouteUrl(trip, dayFilter = null) {
+  if (!trip) return "";
+  const origin = (trip.origin || trip.meetingPoint || "Depok").trim();
+  const rawDest = (trip.destination || "Puncak, Bogor").trim();
+  const finalDest = resolveGmapsDestination(rawDest);
+
+  const rawActivities = (trip.activities || []).filter((act) => !dayFilter || act.day === dayFilter || act.date === dayFilter);
+
+  const waypoints = [];
+  rawActivities.forEach((act) => {
+    const loc = (act.location || "").trim();
+    if (!loc) return;
+    if (/rute|perjalanan|driv|transit|transport/i.test(loc) || /[-–—>]/i.test(loc)) return;
+    const resolved = resolveGmapsDestination(loc, rawDest);
+    if (resolved && !waypoints.includes(resolved) && resolved.toLowerCase() !== origin.toLowerCase() && resolved.toLowerCase() !== finalDest.toLowerCase()) {
+      waypoints.push(resolved);
+    }
+  });
+
+  const travelMode = trip.transportPreference === "walking" ? "walking"
+    : trip.transportPreference === "public" ? "transit"
+    : "driving";
+
+  const params = new URLSearchParams({
+    api: "1",
+    origin: origin,
+    destination: finalDest,
+    travelmode: travelMode,
+  });
+
+  if (waypoints.length > 0) {
+    params.set("waypoints", waypoints.slice(0, 8).join("|"));
+  }
+
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}

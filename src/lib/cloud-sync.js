@@ -5,6 +5,7 @@ import {
   signInAnonymously,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
 } from "firebase/auth";
 import { collection, deleteDoc, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
@@ -34,8 +35,14 @@ export async function signInWithGoogle() {
   requireCloud();
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: "select_account" });
-  const result = await signInWithPopup(auth, provider);
-  return result;
+  try {
+    return await signInWithPopup(auth, provider);
+  } catch (err) {
+    if (err?.code === "auth/popup-blocked" || err?.code === "auth/popup-closed-by-user" || String(err?.message || "").includes("Cross-Origin-Opener-Policy")) {
+      return await signInWithRedirect(auth, provider);
+    }
+    throw err;
+  }
 }
 
 export async function createCloudAccount(email, password) {
