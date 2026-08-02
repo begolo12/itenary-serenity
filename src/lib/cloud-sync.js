@@ -239,19 +239,46 @@ export async function deleteCloudTrip(workspaceId, tripId) {
 }
 
 export function watchCloudTrips(workspaceId, onTrips, onError) {
-  return onSnapshot(collection(db, "workspaces", workspaceId, "trips"), async (snapshot) => {
-    try {
-      const trips = await Promise.all(snapshot.docs.map(async (item) => {
-        const trip = item.data();
-        if (!trip.hasPhoto) return { ...trip, photo: null };
-        const photo = await getDoc(doc(db, "workspaces", workspaceId, "trips", item.id, "photos", "cover"));
-        return { ...trip, photo: photo.exists() ? photo.data() : null };
-      }));
-      onTrips(trips);
-    } catch (error) {
+  // Auto-resubscribe with backoff so transient stream errors don't strand the UI empty.
+  let active = true;
+  let unsub = null;
+  let timer = null;
+  const subscribe = () => {
+    if (!active) return;
+    unsub = onSnapshot(collection(db, "workspaces", workspaceId, "trips"), async (snapshot) => {
+      try {
+        const trips = await Promise.all(snapshot.docs.map(async (item) => {
+          const trip = item.data();
+          if (!trip.hasPhoto) return { ...trip, photo: null };
+          const photo = await getDoc(doc(db, "workspaces", workspaceId, "trips", item.id, "photos", "cover"));
+          return { ...trip, photo: photo.exists() ? photo.data() : null };
+        }));
+        onTrips(trips);
+      } catch (error) {
+        onError(error);
+        scheduleRetry();
+      }
+    }, (error) => {
       onError(error);
-    }
-  }, onError);
+      scheduleRetry();
+    });
+  };
+  let retryDelay = 1000;
+  const scheduleRetry = () => {
+    if (!active) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      unsub?.();
+      retryDelay = Math.min(retryDelay * 2, 8000);
+      subscribe();
+    }, retryDelay);
+  };
+  subscribe();
+  return () => {
+    active = false;
+    clearTimeout(timer);
+    unsub?.();
+  };
 }
 
 const WORKSPACE_CODE_LENGTH = 8;

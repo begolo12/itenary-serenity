@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { auth } from "../../lib/firebase";
 import {
   signInWithGoogle,
   signInToCloud,
@@ -17,6 +19,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [resetMode, setResetMode] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
   useEffect(() => watchAuth((currentUser) => {
     if (currentUser) router.replace("/");
   }), [router]);
@@ -44,6 +49,24 @@ export default function LoginPage() {
       setError(authMessage(err));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleResetPassword = async (event) => {
+    event.preventDefault();
+    if (!email.trim()) {
+      setError("Masukkan email terlebih dahulu.");
+      return;
+    }
+    setResetBusy(true);
+    setError("");
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setResetSent(true);
+    } catch (err) {
+      setError(authMessage(err));
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -114,6 +137,36 @@ export default function LoginPage() {
         </div>
 
         {/* Email/Password Form */}
+        {resetMode ? (
+          <form onSubmit={handleResetPassword}>
+            <label className="login-field">
+              Email terdaftar
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                placeholder="nama@email.com"
+                required
+              />
+            </label>
+            {resetSent ? (
+              <p className="reset-success" role="status">
+                Tautan reset password telah dikirim ke {email.trim()}. Cek inbox (dan folder spam) Anda.
+              </p>
+            ) : (
+              <>
+                {error && <p className="form-error">{error}</p>}
+                <button className="primary wide" disabled={resetBusy}>
+                  {resetBusy ? "Mengirim..." : "Kirim tautan reset"}
+                </button>
+              </>
+            )}
+            <button type="button" className="quiet reset-back" onClick={() => { setResetMode(false); setResetSent(false); setError(""); }}>
+              ← Kembali ke masuk
+            </button>
+          </form>
+        ) : (
         <form onSubmit={handleSubmit}>
           <label className="login-field">
             Email
@@ -141,6 +194,12 @@ export default function LoginPage() {
 
           {error && <p className="form-error">{error}</p>}
 
+          {authMode === "login" && (
+            <button type="button" className="quiet forgot-link" onClick={() => { setResetMode(true); setResetSent(false); setError(""); }}>
+              Lupa password?
+            </button>
+          )}
+
           <button className="primary wide" disabled={busy}>
             {busy
               ? "Memproses..."
@@ -149,6 +208,7 @@ export default function LoginPage() {
                 : "Masuk & sinkronkan"}
           </button>
         </form>
+        )}
 
         {/* Anonymous */}
         <div className="guest-section">
@@ -175,3 +235,4 @@ function authMessage(error) {
   };
   return messages[error?.code] || error?.message || "Terjadi kesalahan. Coba lagi.";
 }
+// touch 1785639210

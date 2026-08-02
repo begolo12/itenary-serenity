@@ -1,4 +1,4 @@
-import { PLAN_TYPES, PLAN_TYPE_LABELS, parsePlan } from "./schemas/plan.js";
+import { PLAN_TYPES, PLAN_TYPE_LABELS, migratePlan, parsePlan } from "./schemas/plan.js";
 export const STORAGE_KEY = "serenity-itinerary-mvp";
 
 export const blankTrip = {
@@ -54,6 +54,31 @@ export const safeUUID = () => {
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 };
+
+export function suggestTitle(form) {
+  const destination = String(form.destination || "").trim();
+  const venue = String(form.venue || "").trim();
+  const destinationLabel = destination || venue;
+  const purpose = String(form.purpose || "").trim();
+  const planType = PLAN_TYPES.includes(form.planType) ? form.planType : "trip";
+  const planTypeLabel = PLAN_TYPE_LABELS[planType];
+  if (!destinationLabel && !purpose && planType === "trip") return "Perjalanan baru";
+  if (planType === "trip") {
+    return [purpose, destinationLabel || "destinasi rekomendasi AI"].filter(Boolean).join(" di ") || "Perjalanan baru";
+  }
+  return `${planTypeLabel}: ${purpose || "Rencana"} · ${venue || destinationLabel || "destinasi rekomendasi AI"}`;
+}
+
+export function cloneTrip(trip, { titleSuffix = " (salinan)" } = {}) {
+  const cloned = migratePlan(JSON.parse(JSON.stringify(trip)));
+  cloned.id = safeUUID();
+  cloned.title = `${trip.title || "Perjalanan"}${titleSuffix}`;
+  cloned.updatedAt = new Date().toISOString();
+  cloned.createdAt = new Date().toISOString();
+  cloned.source = trip.source || "local";
+  cloned.photo = trip.photo ? { ...trip.photo } : null;
+  return cloned;
+}
 
 export function createTemplate(form) {
   const destination = String(form.destination || "").trim();
@@ -141,7 +166,7 @@ export function createTemplate(form) {
   const plan = {
     ...form,
     id: crypto.randomUUID(),
-    title: planType === "trip" ? `${form.purpose} di ${destinationLabel}` : `${planTypeLabel}: ${form.purpose} · ${form.venue || destinationLabel}`,
+    title: suggestTitle(form),
     summary: `${planTypeLabel} ${String(form.purpose || "kegiatan").toLowerCase()} dari ${form.origin} menuju ${destinationLabel}, disusun untuk ${form.people} peserta${form.travelPace ? ` dengan tempo ${form.travelPace}` : ""}.`,
     highlights: interests,
     facts: [`Asal: ${form.origin}`, `${form.venue || "Tujuan"}: ${destinationLabel}`, `Peserta: ${form.people}`, `Tanggal: ${form.startDate}–${form.endDate}`],

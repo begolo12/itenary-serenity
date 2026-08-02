@@ -6,11 +6,16 @@ import { Empty } from "../common/Empty";
 export function Dashboard({ trips, openTrip, create }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [sort, setSort] = useState("newest");
   const today = new Date().toISOString().slice(0, 10);
   const shown = trips.filter((trip) => {
     const match = `${trip.title} ${trip.origin} ${trip.destination}`.toLowerCase().includes(query.toLowerCase());
     const state = trip.endDate < today ? "past" : "upcoming";
     return match && (filter === "all" || filter === state);
+  }).sort((a, b) => {
+    if (sort === "oldest") return String(a.startDate || "").localeCompare(String(b.startDate || ""));
+    if (sort === "title") return String(a.title || "").localeCompare(String(b.title || ""));
+    return String(b.startDate || "").localeCompare(String(a.startDate || ""));
   });
   const openTasks = trips.reduce((sum, trip) => sum + (trip.tasks || []).filter((task) => !task.done).length, 0);
   const currencyTotals = {};
@@ -115,16 +120,27 @@ export function Dashboard({ trips, openTrip, create }) {
       </section>
     )}
     <section className="section-heading"><div><p className="eyebrow">KOLEKSI ANDA</p><h2>Itinerary terbaru</h2></div><button className="text-button" onClick={create}>＋ Rencana baru</button></section>
-    {trips.length > 0 && <div className="filters"><label className="search"><span aria-hidden="true">⌕</span><input aria-label="Cari itinerary" placeholder="Cari tujuan atau judul..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><label><span className="sr-only">Filter perjalanan</span><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">Semua perjalanan</option><option value="upcoming">Akan datang</option><option value="past">Selesai</option></select></label></div>}
+    {trips.length > 0 && <div className="filters"><label className="search"><span aria-hidden="true">⌕</span><input aria-label="Cari itinerary" placeholder="Cari tujuan atau judul..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><label><span className="sr-only">Filter perjalanan</span><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">Semua perjalanan</option><option value="upcoming">Akan datang</option><option value="past">Selesai</option></select></label><label><span className="sr-only">Urutkan perjalanan</span><select aria-label="Urutkan perjalanan" value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Terbaru</option><option value="oldest">Terlama</option><option value="title">A-Z</option></select></label></div>}
     {!trips.length ? <Empty title="Atlas Anda masih kosong" text="Mulai dari template lokal atau hubungkan DeepSeek untuk membuat draft terstruktur." action={create} actionText="Buat itinerary pertama" /> : !shown.length ? <div className="no-results">Tidak ada itinerary yang cocok dengan pencarian ini.</div> : <div className="trip-grid">{shown.map((trip, index) => <TripCard key={trip.id} trip={trip} index={index} openTrip={openTrip} />)}</div>}
   </>;
 }
 
 function TripCard({ trip, index, openTrip }) {
   const done = trip.tasks.filter((task) => task.done).length;
+  const budget = effectiveBudget(trip);
+  const spent = (trip.expenses || []).reduce((sum, item) => sum + Number(item.actualAmount ?? item.amount ?? 0), 0);
+  const remaining = budget - spent;
+  const budgetPct = budget ? Math.round(spent / budget * 100) : 0;
+  const overBudget = remaining < 0;
   return <button className={`trip-card tone-${index % 3}`} onClick={() => openTrip(trip.id)}>
     <span className="trip-index">0{index + 1}</span><span className="trip-monogram">{trip.destination?.slice(0, 2).toUpperCase()}</span>
     <div className="trip-copy"><span className="badge">{trip.source === "ai" ? "DRAFT AI" : "TEMPLATE LOKAL"}</span><h3>{trip.title}</h3><p>{trip.origin} <span>→</span> {trip.destination}</p><small>{dateLabel(trip.startDate)} · {trip.people} orang</small></div>
     <div className="trip-progress"><span>{done}/{trip.tasks.length} tugas</span><i><b style={{ width: `${trip.tasks.length ? done / trip.tasks.length * 100 : 0}%` }} /></i></div>
+    {budget > 0 && (
+      <div className={`trip-budget${overBudget ? " over" : ""}`} title={`Anggaran ${rupiah(budget, trip.currency)} · terpakai ${rupiah(spent, trip.currency)}`}>
+        <span>{overBudget ? `−${rupiah(-remaining, trip.currency)}` : `Sisa ${rupiah(remaining, trip.currency)}`}</span>
+        <i><b style={{ width: `${Math.min(budgetPct, 100)}%` }} /></i>
+      </div>
+    )}
   </button>;
 }

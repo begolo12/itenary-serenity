@@ -19,7 +19,7 @@ export const tabs = [
   ['collaboration', 'Kolaborasi'],
 ];
 export function typeLabel(type) { return ({ activity: 'aktivitas', expense: 'biaya', task: 'tugas', document: 'dokumen', risk: 'risiko' })[type]; }
-function TripDetail({ trip, tab, setTab, updateTrip, removeTrip, toast, cloudReady, readOnly = false, provider = 'deepseek', workspaceId = '', user = null }) {
+function TripDetail({ trip, tab, setTab, updateTrip, removeTrip, onDuplicate, toast, cloudReady, readOnly = false, provider = 'deepseek', workspaceId = '', user = null }) {
   const [modal, setModal] = useState(null);
   const [showRegenerateModal, setShowRegenerateModal] = useState(false);
   const [initialRegenerateSection, setInitialRegenerateSection] = useState('activities');
@@ -111,6 +111,7 @@ function TripDetail({ trip, tab, setTab, updateTrip, removeTrip, toast, cloudRea
       <div className="detail-copy"><span className="badge coral">{trip.source === 'ai' ? 'DRAFT AI · PERLU VERIFIKASI' : 'TEMPLATE LOKAL'}</span><h2>{trip.title}</h2><p>{trip.origin} <b>→</b> {trip.destination}</p><small>{dateLabel(trip.startDate)} – {dateLabel(trip.endDate)} · {trip.people} orang</small><span className="local-photo-note">Foto WebP maksimal 300 KB ikut tersinkron saat cloud aktif.</span></div>
       <div className="detail-actions">
         <button className="light-button" onClick={() => setModal({ type: 'trip', item: trip })}>Edit detail</button>
+        {!readOnly && <button className="light-button" onClick={() => onDuplicate(trip)}>Duplikat</button>}
         <button className="light-button" onClick={() => window.print()}>Cetak / PDF</button>
         {!readOnly && (
           <button

@@ -9,7 +9,7 @@ import {
   watchAuth, watchCloudTrips, watchCloudWorkspaces,
   cloudMessage, mergeCloudTrip,
 } from "../lib/cloud-sync";
-import { STORAGE_KEY } from "../lib/trips";
+import { STORAGE_KEY, cloneTrip } from "../lib/trips";
 import { migratePlan } from "../lib/schemas/plan.js";
 import Sidebar from "../components/layout/Sidebar";
 import Topbar from "../components/layout/Topbar";
@@ -21,6 +21,7 @@ import CalendarView from "../components/trip/CalendarView";
 import Settings from "../components/settings/Settings";
 import { Empty } from "../components/common/Empty";
 import { Status } from "../components/common/Status";
+import OnboardingTour, { hasSeenOnboarding } from "../components/common/OnboardingTour";
 
 const CLOUD_UID_KEY = "serenity-itinerary-cloud-uid";
 const ACTIVE_WORKSPACE_KEY = "serenity-itinerary-active-workspace";
@@ -46,10 +47,14 @@ export default function Home() {
   const [workspaceTripsReady, setWorkspaceTripsReady] = useState(false);
   const cloudUnsubscribe = useRef(null);
   const workspaceUnsubscribe = useRef(null);
+  const tripsWorkspaceRef = useRef(null);
   const deletedIds = useRef(new Set());
   const persistedTripSignatures = useRef(new Map());
   const [pendingApproval, setPendingApproval] = useState(false);
   const pendingUnsubscribe = useRef(null);
+  const pendingPollRef = useRef(null);
+  const pendingReloadAt = useRef(0);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const activeWorkspaceRole = workspaces.find((workspace) => workspace.id === activeWorkspaceId)?.role || "owner";
   const readOnly = activeWorkspaceRole === "viewer";
 
@@ -109,12 +114,23 @@ export default function Home() {
         setPendingApproval(true);
         setCloudReady(true);
         setCloudState("pending");
+        const maybeReload = () => {
+          const now = Date.now();
+          if (now - pendingReloadAt.current < 5000) return;
+          pendingReloadAt.current = now;
+          window.location.reload();
+        };
+        const checkApproval = async () => {
+          try {
+            const snap = await getDoc(doc(db, "users", currentUser.uid));
+            if (snap.data()?.status === "approved") maybeReload();
+          } catch { /* transient; retry on next tick */ }
+        };
         pendingUnsubscribe.current = onSnapshot(doc(db, "users", currentUser.uid), (snap) => {
           const data = snap.data();
-          if (data?.status === "approved") {
-            window.location.reload();
-          }
-        });
+          if (data?.status === "approved") maybeReload();
+        }, checkApproval);
+        pendingPollRef.current = window.setInterval(checkApproval, 3000);
         return;
       }
       setPendingApproval(false);
@@ -143,6 +159,7 @@ export default function Home() {
     cloudUnsubscribe.current?.();
     workspaceUnsubscribe.current?.();
     pendingUnsubscribe.current?.();
+    if (pendingPollRef.current) window.clearInterval(pendingPollRef.current);
   }, []);
 
   useEffect(() => {
@@ -151,13 +168,24 @@ export default function Home() {
     persistedTripSignatures.current.clear();
     if (!cloudReady || !user || !activeWorkspaceId) return undefined;
     setWorkspaceTripsReady(false);
-    setTrips([]);
-    setSelectedId(null);
+    if (tripsWorkspaceRef.current !== null && tripsWorkspaceRef.current !== activeWorkspaceId) {
+      tripsWorkspaceRef.current = activeWorkspaceId;
+      setTrips([]);
+      setSelectedId(null);
+    } else {
+      tripsWorkspaceRef.current = activeWorkspaceId;
+    }
     localStorage.setItem(ACTIVE_WORKSPACE_KEY, activeWorkspaceId);
     cloudUnsubscribe.current = watchCloudTrips(activeWorkspaceId, (cloudTrips) => {
       const visibleTrips = cloudTrips.filter((t) => !deletedIds.current.has(t.id)).map((trip) => migratePlan(trip));
       visibleTrips.forEach((trip) => persistedTripSignatures.current.set(trip.id, JSON.stringify(trip)));
-      setTrips(visibleTrips);
+      setTrips((current) => {
+        // Keep local trips that have never been persisted (no signature yet) —
+        // otherwise a fresh snapshot would overwrite unsaved trips and lose them.
+        const cloudIds = new Set(visibleTrips.map((t) => t.id));
+        const localOnly = current.filter((t) => !cloudIds.has(t.id) && !persistedTripSignatures.current.has(t.id));
+        return [...localOnly, ...visibleTrips];
+      });
       setSelectedId((current) => visibleTrips.some((t) => t.id === current) ? current : visibleTrips[0]?.id || null);
       setWorkspaceTripsReady(true);
       setCloudState(navigator.onLine ? "synced" : "offline");
@@ -176,7 +204,7 @@ export default function Home() {
     return undefined;
   }, [activeWorkspaceId, cloudReady, user]);
   useEffect(() => {
-    if (readOnly || !cloudReady || !user || !activeWorkspaceId || !workspaceTripsReady || !hydrated) return undefined;
+    if (readOnly || !cloudReady || !user || !activeWorkspaceId || !hydrated) return undefined;
     const dirtyTrips = trips.filter((trip) => {
       const signature = JSON.stringify(trip);
       return persistedTripSignatures.current.get(trip.id) !== signature;
@@ -229,9 +257,15 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handler);
   });
 
+  // onboarding tour for first-time users
+  useEffect(() => {
+    if (user && !hasSeenOnboarding()) {
+      setShowOnboarding(true);
+    }
+  }, [user]);
+
   const selected = trips.find((t) => t.id === selectedId);
-  const nav = (target) => setView(target === "new" && readOnly ? "home" : target);
-  const switchWorkspace = (workspaceId) => {
+  const nav = (target) => setView(target === "new" && readOnly ? "home" : target);  const switchWorkspace = (workspaceId) => {
     if (!workspaces.some((w) => w.id === workspaceId)) return;
     localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspaceId);
     setWorkspaceTripsReady(false);
@@ -249,10 +283,11 @@ export default function Home() {
   const updateTrip = (update) => {
     if (readOnly || !selectedId) return;
     const updated = migratePlan({ ...selected, ...update, updatedAt: new Date().toISOString() });
-    persistedTripSignatures.current.set(updated.id, JSON.stringify(updated));
     setTrips((current) => current.map((t) => t.id === selectedId ? updated : t));
     if (cloudReady && user && activeWorkspaceId) {
-      saveCloudTrip(activeWorkspaceId, user.uid, updated).catch((err) => setCloudError(cloudMessage(err)));
+      saveCloudTrip(activeWorkspaceId, user.uid, updated).then(() => {
+        persistedTripSignatures.current.set(updated.id, JSON.stringify(updated));
+      }).catch((err) => setCloudError(cloudMessage(err)));
     }
   };
   const addTrip = async (trip) => {
@@ -270,6 +305,11 @@ export default function Home() {
         setCloudError(cloudMessage(err));
       }
     }
+  };
+  const duplicateTrip = (trip) => {
+    if (readOnly) return;
+    addTrip(cloneTrip(trip));
+    toast("Itinerary diduplikasi.");
   };
   const removeTrip = async (trip) => {
     if (readOnly) return;
@@ -308,18 +348,18 @@ export default function Home() {
     <main className="shell">
       <Sidebar view={view} trips={trips} nav={nav} openTrip={openTrip} cloudState={cloudState} user={user} workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} switchWorkspace={switchWorkspace} />
       <section className="content">
-        <Topbar view={view} selected={selected} cloudState={cloudState} user={user} workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} switchWorkspace={switchWorkspace} />
-        {cloudError && <Status message={cloudError} kind="error" onClose={() => setCloudError("")} />}
+        <Topbar view={view} selected={selected} cloudState={cloudState} user={user} workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} switchWorkspace={switchWorkspace} />        {cloudError && <Status message={cloudError} kind="error" onClose={() => setCloudError("")} />}
         {notice && <Status {...notice} onClose={() => setNotice(null)} />}
         {!hydrated && <div className="skeleton-group"><div className="skeleton" style={{height: 345}} /><div className="skeleton" style={{height: 180}} /><div className="skeleton" style={{height: 180}} /></div>}
         {hydrated && view === "home" && <Dashboard trips={trips} openTrip={openTrip} create={() => nav("new")} />}
         {hydrated && view === "new" && <TripCreator provider={aiProvider} workspaceId={activeWorkspaceId} addTrip={addTrip} cancel={() => nav("home")} toast={toast} />}
-        {hydrated && view === "detail" && selected && <TripDetail trip={selected} tab={tab} setTab={setTab} updateTrip={updateTrip} removeTrip={removeTrip} toast={toast} cloudReady={cloudReady} readOnly={readOnly} provider={aiProvider} workspaceId={activeWorkspaceId} user={user} />}
+        {hydrated && view === "detail" && selected && <TripDetail trip={selected} tab={tab} setTab={setTab} updateTrip={updateTrip} removeTrip={removeTrip} onDuplicate={duplicateTrip} toast={toast} cloudReady={cloudReady} readOnly={readOnly} provider={aiProvider} workspaceId={activeWorkspaceId} user={user} />}
         {hydrated && view === "detail" && !selected && <Empty title="Itinerary tidak ditemukan" text="Pilih itinerary dari beranda atau buat rencana baru." action={() => nav("home")} actionText="Ke beranda" />}
         {hydrated && view === "settings" && <Settings provider={aiProvider} setProvider={setAiProvider} user={user} memberCode={memberCode} cloudState={cloudState} cloudReady={cloudReady} toast={toast} workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} switchWorkspace={switchWorkspace} activateWorkspace={activateWorkspace} />}
         {hydrated && view === "calendar" && <CalendarView trips={trips} openTrip={openTrip} create={() => nav("new")} />}
       </section>
       <BottomNav view={view} nav={nav} openTrip={openTrip} selectedId={selectedId} trips={trips} />
+      {showOnboarding && <OnboardingTour onDone={() => setShowOnboarding(false)} />}
     </main>
   );
 }

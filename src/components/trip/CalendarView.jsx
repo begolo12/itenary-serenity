@@ -137,9 +137,9 @@ function CalendarView({ trips, openTrip, create }) {
           <div className="calendar-toolbar">
             <button className="calendar-today-btn" onClick={goToday}>Hari ini</button>
             <div className="calendar-month-nav">
-              <button onClick={prevMonth} aria-label="Bulan sebelumnya" aria-hidden="true">‹</button>
-              <h2>{MONTHS[month]} {year}</h2>
-              <button onClick={nextMonthNav} aria-label="Bulan berikutnya" aria-hidden="true">›</button>
+              <button onClick={prevMonth} aria-label="Bulan sebelumnya">‹</button>
+              <h2 aria-live="polite">{MONTHS[month]} {year}</h2>
+              <button onClick={nextMonthNav} aria-label="Bulan berikutnya">›</button>
             </div>
             <span className="calendar-total">{scheduled.length} itinerary</span>
           </div>

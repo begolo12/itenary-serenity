@@ -1,13 +1,13 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import {
-  signInToCloud, signOutFromCloud, signInWithGoogle,
+import { signInToCloud, signOutFromCloud, signInWithGoogle,
   signInWithCloudAccount, createCloudAccount,
   createWorkspace, joinWorkspaceByCode, inviteUserToWorkspace,
   deleteWorkspace, leaveWorkspace, resetPersonalWorkspace,
   watchWorkspaceMembers, removeWorkspaceMember,
   cloudMessage, SUPER_ADMIN_EMAIL,
 } from "../../lib/cloud-sync";
+import { sendEmailVerification } from "firebase/auth";
 import { getAiProviderStatus, generateWithAi } from "../../lib/ai-client";
 import { CURRENCY_KEY, CURRENCY_LIST } from "../../lib/trips";
 import { syncLabel } from "../layout/Sidebar";
@@ -33,6 +33,7 @@ export function authMessage(error) {
 
 function Settings({ provider, setProvider, user, memberCode, cloudState, cloudReady, toast, workspaces, activeWorkspaceId, switchWorkspace, activateWorkspace }) {
   const [testing, setTesting] = useState(false);
+  const [verifyBusy, setVerifyBusy] = useState(false);
   const [aiStatus, setAiStatus] = useState(null);
   const [loadingAi, setLoadingAi] = useState(true);
   const [authMode, setAuthMode] = useState("login");
@@ -115,6 +116,17 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
   const changeCurrency = (value) => { setCurrency(value); try { localStorage.setItem(CURRENCY_KEY, value); } catch {} };
   const connect = async () => { try { await signInToCloud(); toast("Mode tamu aktif. Menyiapkan workspace cloud..."); } catch (error) { toast(authMessage(error), "error"); } };
   const disconnect = async () => { try { await signOutFromCloud(); toast("Keluar dari cloud. Data lokal tetap tersedia."); } catch (error) { toast(cloudMessage(error), "error"); } };
+  const sendVerificationEmail = async () => {
+    setVerifyBusy(true);
+    try {
+      await sendEmailVerification(user);
+      toast("Email verifikasi telah dikirim. Cek inbox Anda.");
+    } catch (error) {
+      toast(authMessage(error), "error");
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
   const submitAccount = async (event) => {
     event.preventDefault();
     if (!email.trim() || password.length < 6) { toast("Masukkan email valid dan password minimal 6 karakter.", "error"); return; }
@@ -370,9 +382,19 @@ function Settings({ provider, setProvider, user, memberCode, cloudState, cloudRe
               <div>
                 <span className={`state-dot ${cloudState}`} />
                 <strong>{syncLabel(cloudState)}</strong>
-                <small>{user.isAnonymous ? `Mode tamu · ${user.uid.slice(0, 8)}\u2026` : user.email}</small>
+                <small>{user.isAnonymous ? `Mode tamu · ${user.uid.slice(0, 8)}…` : user.email}</small>
+                {!user.isAnonymous && user.emailVerified === false && (
+                  <small className="verify-warning">Email belum diverifikasi</small>
+                )}
               </div>
-              <button className="quiet" onClick={disconnect}>Keluar dari cloud</button>
+              <div className="sync-setting-actions">
+                {!user.isAnonymous && user.emailVerified === false && (
+                  <button className="quiet" onClick={sendVerificationEmail} disabled={verifyBusy}>
+                    {verifyBusy ? "Mengirim..." : "Kirim email verifikasi"}
+                  </button>
+                )}
+                <button className="quiet" onClick={disconnect}>Keluar dari cloud</button>
+              </div>
             </div>
           </>
         ) : (

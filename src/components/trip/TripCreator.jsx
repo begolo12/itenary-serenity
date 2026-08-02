@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { CityAutocomplete } from '../common/CityAutocomplete';
 import { Field } from '../common/Field';
-import { blankTrip, createTemplate, validateTrip } from '../../lib/trips';
+import { blankTrip, createTemplate, suggestTitle, validateTrip } from '../../lib/trips';
 import { generateWithAi } from '../../lib/ai-client';
 import { PLAN_TYPES, PLAN_TYPE_LABELS } from '../../lib/schemas/plan.js';
 
@@ -194,6 +194,10 @@ function TripCreator({ provider, workspaceId, addTrip, cancel, toast }) {
         )}
         {step === 4 && (
           <div>
+            <div className="title-preview card-inline" aria-live="polite">
+              <span className="eyebrow">JUDUL RENCANA</span>
+              <strong>{suggestTitle(form)}</strong>
+            </div>
             <div className="review-grid">
               <div><span>Jenis</span><strong>{PLAN_TYPE_LABELS[form.planType]} · {form.purpose || 'umum'}</strong></div>
               <div><span>Rute / venue</span><strong>{form.origin} → {form.destination || form.venue || 'Rekomendasi AI'}</strong></div>
